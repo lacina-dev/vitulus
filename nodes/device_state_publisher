@@ -418,7 +418,7 @@ class Node:
         if self.is_msg_gnss_fix_valid:
             if (self.msg_gnss_navstatus.gpsFix == 3):
                 self.msg_icon_status.gnss = "3DFIX"
-                if (self.msg_gnss_fix.status == 2):
+                if (self.msg_gnss_fix.status.status == 2):
                     self.msg_icon_status.gnss = "RTK"
             else:
                 self.msg_icon_status.gnss = "BAD"
@@ -443,7 +443,7 @@ class Node:
         if self.is_msg_gnss_nav_fix_valid:
             if (self.msg_gnss_nav_navstatus.gpsFix == 3):
                 self.msg_icon_status.gnss_nav = "3DFIX"
-                if (self.msg_gnss_nav_fix.status == 2):
+                if (self.msg_gnss_nav_fix.status.status == 2):
                     self.msg_icon_status.gnss_nav = "RTK"
             else:
                 self.msg_icon_status.gnss_nav = "BAD"
