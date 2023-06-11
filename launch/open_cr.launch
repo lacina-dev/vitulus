@@ -1,0 +1,9 @@
+<launch>
+
+  <node pkg="rosserial_python" type="serial_node.py" name="vitulus_core" respawn="true" respawn_delay="1" output="screen">
+    <param name="port" value="/dev/opencr"/>
+    <param name="baud" value="115200"/>
+    <param name="tf_prefix" value=""/>
+  </node>
+
+</launch>

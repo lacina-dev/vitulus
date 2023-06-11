@@ -1,0 +1,568 @@
+#!/usr/bin/env python
+import rospy
+import time
+from std_msgs.msg import Bool, String
+from sensor_msgs.msg import LaserScan, NavSatFix
+from ublox_msgs.msg import NavSTATUS
+from vitulus_msgs.msg import Power_status
+from vitulus_msgs.msg import Device_icon_status
+from vitulus_msgs.msg import NmConnDetail
+from vitulus_msgs.msg import Moteus_controller_state
+from vitulus_msgs.msg import Imu_status
+from vitulus_msgs.msg import Mower
+from realsense2_camera.msg import Metadata
+import sys
+import signal
+
+class Node:
+
+    def __init__(self):
+        self.sub_pm_power_status = rospy.Subscriber("/pm/power_status", Power_status, self.callback_pm_power_status)
+        self.msg_pm_power_status = Power_status()
+        self.msg_pm_power_status.header.stamp = rospy.Time.now()
+        self.PM_POWER_STATUS_TIMEOUT = 2
+        self.is_msg_pm_power_status_valid = False
+
+        self.sub_nm_conn_detail = rospy.Subscriber("/nmcli/conn_detail", NmConnDetail, self.callback_nm_conn_detail)
+        self.msg_nm_conn_detail = NmConnDetail()
+        self.msg_nm_conn_detail.header.stamp = rospy.Time.now()
+        self.NM_CONN_DETAIL_TIMEOUT = 3
+        self.is_msg_nm_conn_detail_valid = False
+
+        self.BASE_WHEEL_SLOW_STATE_TIMEOUT = 4
+        self.sub_base_front_left_wheel_slow_state = rospy.Subscriber("/base/front_left_wheel_state", Moteus_controller_state, self.callback_base_front_left_wheel_slow_state)
+        self.msg_base_front_left_wheel_slow_state = Moteus_controller_state()
+        self.msg_base_front_left_wheel_slow_state.header.stamp = rospy.Time.now()
+        self.is_msg_base_front_left_wheel_slow_state_valid = False
+
+        self.sub_base_front_right_wheel_slow_state = rospy.Subscriber("/base/front_right_wheel_state", Moteus_controller_state, self.callback_base_front_right_wheel_slow_state)
+        self.msg_base_front_right_wheel_slow_state = Moteus_controller_state()
+        self.msg_base_front_right_wheel_slow_state.header.stamp = rospy.Time.now()
+        self.is_msg_base_front_right_wheel_slow_state_valid = False
+
+        self.sub_base_rear_left_wheel_slow_state = rospy.Subscriber("/base/rear_left_wheel_state", Moteus_controller_state, self.callback_base_rear_left_wheel_slow_state)
+        self.msg_base_rear_left_wheel_slow_state = Moteus_controller_state()
+        self.msg_base_rear_left_wheel_slow_state.header.stamp = rospy.Time.now()
+        self.is_msg_base_rear_left_wheel_slow_state_valid = False
+
+        self.sub_base_rear_right_wheel_slow_state = rospy.Subscriber("/base/rear_right_wheel_state", Moteus_controller_state, self.callback_base_rear_right_wheel_slow_state)
+        self.msg_base_rear_right_wheel_slow_state = Moteus_controller_state()
+        self.msg_base_rear_right_wheel_slow_state.header.stamp = rospy.Time.now()
+        self.is_msg_base_rear_right_wheel_slow_state_valid = False
+
+        self.BNO085_IMU_STATUS_TIMEOUT = 3
+        self.sub_bno085_imu_status = rospy.Subscriber("/bno085/imu_status", Imu_status, self.callback_bno085_imu_status)
+        self.msg_bno085_imu_status = Imu_status()
+        self.msg_bno085_imu_status.header.stamp = rospy.Time.now()
+        self.is_msg_bno085_imu_status_valid = False
+
+        self.SCAN_TIMEOUT = 3
+        self.sub_scan = rospy.Subscriber("/scan", LaserScan, self.callback_scan)
+        self.msg_scan = LaserScan()
+        self.msg_scan.header.stamp = rospy.Time.now()
+        self.is_msg_scan_valid = False
+
+        self.D435_COLOR_METADATA_TIMEOUT = 3
+        self.sub_d435_color_metadata = rospy.Subscriber("/d435/color/metadata", Metadata, self.callback_d435_color_metadata)
+        self.msg_d435_color_metadata = Metadata()
+        self.msg_d435_color_metadata.header.stamp = rospy.Time.now()
+        self.is_msg_d435_color_metadata_valid = False
+
+        self.GNSS_FIX_TIMEOUT = 3
+        self.sub_gnss_fix = rospy.Subscriber("/gnss/fix", NavSatFix, self.callback_gnss_fix)
+        self.msg_gnss_fix = NavSatFix()
+        self.msg_gnss_fix.header.stamp = rospy.Time.now()
+        self.is_msg_gnss_fix_valid = False
+        self.sub_gnss_navstatus = rospy.Subscriber("/gnss/navstatus", NavSTATUS, self.callback_gnss_navstatus)
+        self.msg_gnss_navstatus = NavSTATUS()
+
+        self.GNSS_NAV_FIX_TIMEOUT = 3
+        self.sub_gnss_nav_fix = rospy.Subscriber("/gnss_lite/fix", NavSatFix, self.callback_gnss_nav_fix)
+        self.msg_gnss_nav_fix = NavSatFix()
+        self.msg_gnss_nav_fix.header.stamp = rospy.Time.now()
+        self.is_msg_gnss_nav_fix_valid = False
+        self.sub_gnss_nav_navstatus = rospy.Subscriber("/gnss_lite/navstatus", NavSTATUS, self.callback_gnss_nav_navstatus)
+        self.msg_gnss_nav_navstatus = NavSTATUS()
+
+        self.MOWER_STATUS_TIMEOUT = 4
+        self.sub_mower_status = rospy.Subscriber("/mower/status", Mower, self.callback_mower_status)
+        self.msg_mower_status = Mower()
+        self.msg_mower_status.header.stamp = rospy.Time.now()
+        self.is_msg_mower_status_valid = False
+
+        self.pub_icon_status = rospy.Publisher('icon_status', Device_icon_status, queue_size=10)
+        self.msg_icon_status = Device_icon_status()
+        self.msg_icon_status.supply = "DISABLED"
+        self.msg_icon_status.batt = "DISABLED"
+        self.msg_icon_status.fan_int = "DISABLED"
+        self.msg_icon_status.temp_int = "DISABLED"
+        self.msg_icon_status.fan_ext = "DISABLED"
+        self.msg_icon_status.temp_ext = "DISABLED"
+        self.msg_icon_status.mot_lf = "DISABLED"
+        self.msg_icon_status.mot_rf = "DISABLED"
+        self.msg_icon_status.mot_lr = "DISABLED"
+        self.msg_icon_status.mot_rr = "DISABLED"
+        self.msg_icon_status.mower = "DISABLED"
+        self.msg_icon_status.imu = "DISABLED"
+        self.msg_icon_status.gnss_nav = "DISABLED"
+        self.msg_icon_status.gnss = "DISABLED"
+        self.msg_icon_status.wifi = "DISABLED"
+
+    def check_messages_timeout(self):
+        # pm_power_status
+        if ((rospy.Time.now().secs - self.msg_pm_power_status.header.stamp.secs) < self.PM_POWER_STATUS_TIMEOUT):
+            self.is_msg_pm_power_status_valid = True
+        else:
+            self.is_msg_pm_power_status_valid = False
+
+        #  nm_conn_detail
+        if ((rospy.Time.now().secs - self.msg_nm_conn_detail.header.stamp.secs) < self.NM_CONN_DETAIL_TIMEOUT):
+            self.is_msg_nm_conn_detail_valid = True
+        else:
+            self.is_msg_nm_conn_detail_valid = False
+
+        #  base_front_left_wheel_slow_state
+        if ((rospy.Time.now().secs - self.msg_base_front_left_wheel_slow_state.header.stamp.secs) < self.BASE_WHEEL_SLOW_STATE_TIMEOUT):
+            self.is_msg_base_front_left_wheel_slow_state_valid = True
+        else:
+            self.is_msg_base_front_left_wheel_slow_state_valid = False
+
+        #  base_front_right_wheel_slow_state
+        if ((rospy.Time.now().secs - self.msg_base_front_right_wheel_slow_state.header.stamp.secs) < self.BASE_WHEEL_SLOW_STATE_TIMEOUT):
+            self.is_msg_base_front_right_wheel_slow_state_valid = True
+        else:
+            self.is_msg_base_front_right_wheel_slow_state_valid = False
+
+        #  base_rear_left_wheel_slow_state
+        if ((rospy.Time.now().secs - self.msg_base_rear_left_wheel_slow_state.header.stamp.secs) < self.BASE_WHEEL_SLOW_STATE_TIMEOUT):
+            self.is_msg_base_rear_left_wheel_slow_state_valid = True
+        else:
+            self.is_msg_base_rear_left_wheel_slow_state_valid = False
+
+        #  base_rear_right_wheel_slow_state
+        if ((rospy.Time.now().secs - self.msg_base_rear_right_wheel_slow_state.header.stamp.secs) < self.BASE_WHEEL_SLOW_STATE_TIMEOUT):
+            self.is_msg_base_rear_right_wheel_slow_state_valid = True
+        else:
+            self.is_msg_base_rear_right_wheel_slow_state_valid = False
+
+        #  bno085_imu_status
+        if ((rospy.Time.now().secs - self.msg_bno085_imu_status.header.stamp.secs) < self.BNO085_IMU_STATUS_TIMEOUT):
+            self.is_msg_bno085_imu_status_valid = True
+        else:
+            self.is_msg_bno085_imu_status_valid = False
+
+        #  Laser scan
+        if ((rospy.Time.now().secs - self.msg_scan.header.stamp.secs) < self.SCAN_TIMEOUT):
+            self.is_msg_scan_valid = True
+        else:
+            self.is_msg_scan_valid = False
+
+        #  Laser scan
+        if ((rospy.Time.now().secs - self.msg_d435_color_metadata.header.stamp.secs) < self.D435_COLOR_METADATA_TIMEOUT):
+            self.is_msg_d435_color_metadata_valid = True
+        else:
+            self.is_msg_d435_color_metadata_valid = False
+
+        #  GNSS
+        if ((rospy.Time.now().secs - self.msg_gnss_fix.header.stamp.secs) < self.GNSS_FIX_TIMEOUT):
+            self.is_msg_gnss_fix_valid = True
+        else:
+            self.is_msg_gnss_fix_valid = False
+
+        #  GNSS_NAV
+        if ((rospy.Time.now().secs - self.msg_gnss_nav_fix.header.stamp.secs) < self.GNSS_NAV_FIX_TIMEOUT):
+            self.is_msg_gnss_nav_fix_valid = True
+        else:
+            self.is_msg_gnss_nav_fix_valid = False
+
+        #  MOWER
+        if ((rospy.Time.now().secs - self.msg_mower_status.header.stamp.secs) < self.MOWER_STATUS_TIMEOUT):
+            self.is_msg_mower_status_valid = True
+        else:
+            self.is_msg_mower_status_valid = False
+
+    def set_ico_supply_status(self):
+        # If the messages are comming, so the power module is alive
+        if self.is_msg_pm_power_status_valid:
+                # ONLINE, FAIL, OFFLINE, DISABLED
+                if (self.msg_pm_power_status.supply_status == "ONLINE"):
+                    self.msg_icon_status.supply = "ONLINE"
+                if (self.msg_pm_power_status.supply_status == "FAIL"):
+                    self.msg_icon_status.supply = "FAIL"
+                if (self.msg_pm_power_status.supply_status == "OFFLINE"):
+                    self.msg_icon_status.supply = "OFFLINE"
+        # If the messages not comming, so the power module is not connected
+        else:
+            self.msg_icon_status.supply = "DISABLED"
+
+    def set_ico_batt_status(self):
+        # If the messages are comming, so the power module is alive
+        if self.is_msg_pm_power_status_valid:
+            if (self.msg_pm_power_status.charger_status != "CHARGING"):
+                if (self.msg_pm_power_status.battery_capacity <= 100):
+                    self.msg_icon_status.batt = "FULL"
+                if (self.msg_pm_power_status.battery_capacity <= 75):
+                    self.msg_icon_status.batt = "75"
+                if (self.msg_pm_power_status.battery_capacity <= 50):
+                    self.msg_icon_status.batt = "50"
+                if (self.msg_pm_power_status.battery_capacity <= 25):
+                    self.msg_icon_status.batt = "25"
+                if (self.msg_pm_power_status.battery_capacity <= 5):
+                    self.msg_icon_status.batt = "EMPTY"
+            else:
+                if (self.msg_pm_power_status.battery_capacity <= 100):
+                    self.msg_icon_status.batt = "FULL_CHARGE"
+                if (self.msg_pm_power_status.battery_capacity <= 75):
+                    self.msg_icon_status.batt = "75_CHARGE"
+                if (self.msg_pm_power_status.battery_capacity <= 50):
+                    self.msg_icon_status.batt = "50_CHARGE"
+                if (self.msg_pm_power_status.battery_capacity <= 25):
+                    self.msg_icon_status.batt = "25_CHARGE"
+                if (self.msg_pm_power_status.battery_capacity <= 5):
+                    self.msg_icon_status.batt = "EMPTY_CHARGE"
+        # If the messages not comming, so the power module is not connected
+        else:
+            self.msg_icon_status.batt = "DISABLED"
+
+    def set_ico_fan_ext_status(self):
+        # If the messages are comming, so the power module is alive
+        if self.is_msg_pm_power_status_valid:
+                if (self.msg_pm_power_status.fan_rpm > 0):
+                    self.msg_icon_status.fan_ext = "ON"
+                else:
+                    self.msg_icon_status.fan_ext = "OFF"
+        # If the messages not comming, so the power module is not connected
+        else:
+            self.msg_icon_status.fan_ext = "DISABLED"
+
+    def set_ico_temp_ext_status(self):
+        # If the messages are comming, so the power module is alive
+        if self.is_msg_pm_power_status_valid:
+            if (self.msg_pm_power_status.temp <= (self.msg_pm_power_status.temp_setpoint + 9.0)):
+                self.msg_icon_status.temp_ext = "OK"
+            if (self.msg_pm_power_status.temp > (self.msg_pm_power_status.temp_setpoint + 9.0)
+                    and self.msg_pm_power_status.temp <= (self.msg_pm_power_status.temp_setpoint + 15.0)):
+                self.msg_icon_status.temp_ext = "WARM"
+            if (self.msg_pm_power_status.temp > (self.msg_pm_power_status.temp_setpoint + 15.0)):
+                self.msg_icon_status.temp_ext = "HOT"
+        # If the messages not comming, so the power module is not connected
+        else:
+            self.msg_icon_status.temp_ext = "DISABLED"
+
+
+    def set_ico_temp_int_status(self):
+        # If the messages are comming, so the power module is alive
+        if self.is_msg_pm_power_status_valid:
+            if (self.msg_pm_power_status.temp2 <= (self.msg_pm_power_status.temp2_setpoint + 9.0)):
+                self.msg_icon_status.temp_int = "OK"
+            if (self.msg_pm_power_status.temp2 > (self.msg_pm_power_status.temp2_setpoint + 9.0)
+                    and self.msg_pm_power_status.temp2 <= (self.msg_pm_power_status.temp2_setpoint + 15.0)):
+                self.msg_icon_status.temp_int = "WARM"
+            if (self.msg_pm_power_status.temp2 > (self.msg_pm_power_status.temp2_setpoint + 15.0)):
+                self.msg_icon_status.temp_int = "HOT"
+        # If the  messages not comming, so the power module is not connected
+        else:
+            self.msg_icon_status.temp_int = "DISABLED"
+
+
+    def set_ico_fan_int_status(self):
+        # If the  messages are comming, so the power module is alive
+        if self.is_msg_pm_power_status_valid:
+                if (self.msg_pm_power_status.fan2_rpm > 0):
+                    self.msg_icon_status.fan_int = "ON"
+                else:
+                    self.msg_icon_status.fan_int = "OFF"
+        # If the  messages not comming, so the power module is not connected
+        else:
+            self.msg_icon_status.fan_int = "DISABLED"
+
+    def set_ico_wifi_status(self):
+        # If the connection detail messages are comming, so the nmcli is alive
+        if self.is_msg_nm_conn_detail_valid:
+            # FINE, MEDIUM, BAD, DISCONNECTED
+            if (self.msg_nm_conn_detail.status == "Connected"):
+                if (int(self.msg_nm_conn_detail.signal) >= 60):
+                    self.msg_icon_status.wifi = "FINE"
+                if (int(self.msg_nm_conn_detail.signal) < 60 and int(self.msg_nm_conn_detail.signal) >= 30):
+                    self.msg_icon_status.wifi = "MEDIUM"
+                if (int(self.msg_nm_conn_detail.signal) < 30):
+                    self.msg_icon_status.wifi = "BAD"
+            else:
+                self.msg_icon_status.wifi = "DISABLED"
+        # If the  messages not comming, so the nmcli is not connected
+        else:
+            self.msg_icon_status.wifi = "DISABLED"
+
+    def set_ico_motors_status(self):
+        TEMP_OK = 40
+        TEMP_WARM = 60
+
+
+        # FRONT LEFT MOTOR CONTROLLER
+        # If the  messages are comming, so the controller is alive
+        if self.is_msg_base_front_left_wheel_slow_state_valid:
+                if (self.msg_base_front_left_wheel_slow_state.mode == "POSITION"
+                        and self.msg_base_front_left_wheel_slow_state.fault == "OK"
+                        and self.msg_base_front_left_wheel_slow_state.torque != 0):
+                    if (self.msg_base_front_left_wheel_slow_state.temperature <= TEMP_OK):
+                        self.msg_icon_status.mot_lf = "OK"
+                    if (self.msg_base_front_left_wheel_slow_state.temperature <= TEMP_WARM and self.msg_base_front_left_wheel_slow_state.temperature > TEMP_OK):
+                        self.msg_icon_status.mot_lf = "WARM"
+                    if (self.msg_base_front_left_wheel_slow_state.temperature > TEMP_WARM):
+                        self.msg_icon_status.mot_lf = "HOT"
+                else:
+                    self.msg_icon_status.mot_lf = "DISABLED"
+        # If the  messages not comming, so the controller is not connected
+        else:
+            self.msg_icon_status.mot_lf = "DISABLED"
+
+        # FRONT RIGHT MOTOR CONTROLLER
+        # If the  messages are comming, so the controller is alive
+        if self.is_msg_base_front_right_wheel_slow_state_valid:
+            if (self.msg_base_front_right_wheel_slow_state.mode == "POSITION"
+                    and self.msg_base_front_right_wheel_slow_state.fault == "OK"
+                    and self.msg_base_front_right_wheel_slow_state.torque != 0):
+                if (self.msg_base_front_right_wheel_slow_state.temperature <= TEMP_OK):
+                    self.msg_icon_status.mot_rf = "OK"
+                if (
+                        self.msg_base_front_right_wheel_slow_state.temperature <= TEMP_WARM and self.msg_base_front_right_wheel_slow_state.temperature > TEMP_OK):
+                    self.msg_icon_status.mot_rf = "WARM"
+                if (self.msg_base_front_right_wheel_slow_state.temperature > TEMP_WARM):
+                    self.msg_icon_status.mot_rf = "HOT"
+            else:
+                self.msg_icon_status.mot_rf = "DISABLED"
+        # If the  messages not comming, so the controller is not connected
+        else:
+            self.msg_icon_status.mot_rf = "DISABLED"
+
+        # REAR LEFT MOTOR CONTROLLER
+        # If the  messages are comming, so the controller is alive
+        if self.is_msg_base_rear_left_wheel_slow_state_valid:
+            if (self.msg_base_rear_left_wheel_slow_state.mode == "POSITION"
+                    and self.msg_base_rear_left_wheel_slow_state.fault == "OK"
+                    and self.msg_base_rear_left_wheel_slow_state.torque != 0):
+                if (self.msg_base_rear_left_wheel_slow_state.temperature <= TEMP_OK):
+                    self.msg_icon_status.mot_lr = "OK"
+                if (
+                        self.msg_base_rear_left_wheel_slow_state.temperature <= TEMP_WARM and self.msg_base_rear_left_wheel_slow_state.temperature > TEMP_OK):
+                    self.msg_icon_status.mot_lr = "WARM"
+                if (self.msg_base_rear_left_wheel_slow_state.temperature > TEMP_WARM):
+                    self.msg_icon_status.mot_lr = "HOT"
+            else:
+                self.msg_icon_status.mot_lr = "DISABLED"
+        # If the  messages not comming, so the controller is not connected
+        else:
+            self.msg_icon_status.mot_lr = "DISABLED"
+
+        # REAR RIGHT MOTOR CONTROLLER
+        # If the  messages are comming, so the controller is alive
+        if self.is_msg_base_rear_right_wheel_slow_state_valid:
+            if (self.msg_base_rear_right_wheel_slow_state.mode == "POSITION"
+                    and self.msg_base_rear_right_wheel_slow_state.fault == "OK"
+                    and self.msg_base_rear_right_wheel_slow_state.torque != 0):
+                if (self.msg_base_rear_right_wheel_slow_state.temperature <= TEMP_OK):
+                    self.msg_icon_status.mot_rr = "OK"
+                if (
+                        self.msg_base_rear_right_wheel_slow_state.temperature <= TEMP_WARM and self.msg_base_rear_right_wheel_slow_state.temperature > TEMP_OK):
+                    self.msg_icon_status.mot_rr = "WARM"
+                if (self.msg_base_rear_right_wheel_slow_state.temperature > TEMP_WARM):
+                    self.msg_icon_status.mot_rr = "HOT"
+            else:
+                self.msg_icon_status.mot_rr = "DISABLED"
+        # If the  messages not comming, so the controller is not connected
+        else:
+            self.msg_icon_status.mot_rr = "DISABLED"
+
+    def set_ico_imu_status(self):
+        # If the  messages are comming, so the imu is alive
+        if self.is_msg_bno085_imu_status_valid:
+            if self.msg_bno085_imu_status.status:
+                self.msg_icon_status.imu = "ON"
+            else:
+                self.msg_icon_status.imu = "OFF"
+        # If the  messages not comming, so the imu is not connected
+        else:
+            self.msg_icon_status.imu = "DISABLED"
+
+    def set_ico_lidar_status(self):
+        # If the  messages are comming, so the lidar is alive
+        if self.is_msg_scan_valid:
+            self.msg_icon_status.lidar = "ON"
+        # If the  messages not comming, so the lidar is not connected
+        else:
+            self.msg_icon_status.lidar = "DISABLED"
+
+    def set_ico_d435_status(self):
+        # If the  messages are comming, so the d435 is alive
+        if self.is_msg_d435_color_metadata_valid:
+            self.msg_icon_status.d435 = "ON"
+        # If the  messages not comming, so the d435 is not connected
+        else:
+            self.msg_icon_status.d435 = "DISABLED"
+
+    def set_ico_gnss_status(self):
+        # ####### FIX
+        # STATUS_NO_FIX = -1  # unable to fix position
+        # STATUS_FIX = 0  # unaugmented fix
+        # STATUS_SBAS_FIX = 1  # with satellite-based augmentation
+        # STATUS_GBAS_FIX = 2  # with ground-based augmentation
+        # ####### NAVSTATUS
+        # GPS_NO_FIX = 0
+        # GPS_DEAD_RECKONING_ONLY = 1
+        # GPS_2D_FIX = 2
+        # GPS_3D_FIX = 3
+        # GPS_GPS_DEAD_RECKONING_COMBINED = 4
+        # GPS_TIME_ONLY_FIX = 5
+        # If the messages are comming, so the gnss is alive
+
+        if self.is_msg_gnss_fix_valid:
+            if (self.msg_gnss_navstatus.gpsFix == 3):
+                self.msg_icon_status.gnss = "3DFIX"
+                if (self.msg_gnss_fix.status == 2):
+                    self.msg_icon_status.gnss = "RTK"
+            else:
+                self.msg_icon_status.gnss = "BAD"
+        # If the messages not comming, so the gnss is not connected
+        else:
+            self.msg_icon_status.gnss = "DISABLED"
+
+    def set_ico_gnss_nav_status(self):
+        # ####### FIX
+        # STATUS_NO_FIX = -1  # unable to fix position
+        # STATUS_FIX = 0  # unaugmented fix
+        # STATUS_SBAS_FIX = 1  # with satellite-based augmentation
+        # STATUS_GBAS_FIX = 2  # with ground-based augmentation
+        # ####### NAVSTATUS
+        # GPS_NO_FIX = 0
+        # GPS_DEAD_RECKONING_ONLY = 1
+        # GPS_2D_FIX = 2
+        # GPS_3D_FIX = 3
+        # GPS_GPS_DEAD_RECKONING_COMBINED = 4
+        # GPS_TIME_ONLY_FIX = 5
+        # If the messages are comming, so the gnss nav is alive
+        if self.is_msg_gnss_nav_fix_valid:
+            if (self.msg_gnss_nav_navstatus.gpsFix == 3):
+                self.msg_icon_status.gnss_nav = "3DFIX"
+                if (self.msg_gnss_nav_fix.status == 2):
+                    self.msg_icon_status.gnss_nav = "RTK"
+            else:
+                self.msg_icon_status.gnss_nav = "BAD"
+        # If the messages not comming, so the gnssnav is not connected
+        else:
+            self.msg_icon_status.gnss_nav = "DISABLED"
+
+    def set_ico_mower_status(self):
+        #  RUN, WAIT, ERROR, CHANGE_HEIGHT, HOME, CALIBRATING, INIT, OFF
+
+        # If the  messages are comming, so the mower is alive
+        if self.is_msg_mower_status_valid:
+            if self.msg_mower_status.status == "RUN":
+                self.msg_icon_status.mower = "ON"
+            if self.msg_mower_status.status == "WAIT":
+                self.msg_icon_status.mower = "ON"
+            if self.msg_mower_status.status == "CHANGE_HEIGHT":
+                self.msg_icon_status.mower = "BUSY"
+            if self.msg_mower_status.status == "HOME":
+                self.msg_icon_status.mower = "BUSY"
+            if self.msg_mower_status.status == "CALIBRATING":
+                self.msg_icon_status.mower = "BUSY"
+            if self.msg_mower_status.status == "INIT":
+                self.msg_icon_status.mower = "BUSY"
+            if self.msg_mower_status.status == "ERROR":
+                self.msg_icon_status.mower = "ERROR"
+            if self.msg_mower_status.status == "OFF":
+                self.msg_icon_status.mower = "DISABLED"
+        # If the  messages not comming, so the mower is not connected
+        else:
+            self.msg_icon_status.mower = "DISABLED"
+
+    def publish_icon_status(self):
+        self.msg_icon_status.header.stamp = rospy.Time.now()
+        self.pub_icon_status.publish(self.msg_icon_status)
+
+    def callback_pm_power_status(self, msg):
+        self.msg_pm_power_status = msg
+
+    def callback_nm_conn_detail(self, msg):
+        self.msg_nm_conn_detail = msg
+
+    def callback_base_front_left_wheel_slow_state(self, msg):
+        self.msg_base_front_left_wheel_slow_state = msg
+
+    def callback_base_front_right_wheel_slow_state(self, msg):
+        self.msg_base_front_right_wheel_slow_state = msg
+
+    def callback_base_rear_left_wheel_slow_state(self, msg):
+        self.msg_base_rear_left_wheel_slow_state = msg
+
+    def callback_base_rear_right_wheel_slow_state(self, msg):
+        self.msg_base_rear_right_wheel_slow_state = msg
+
+    def callback_bno085_imu_status(self, msg):
+        self.msg_bno085_imu_status = msg
+
+    def callback_scan(self, msg):
+        self.msg_scan.header = msg.header
+
+    def callback_d435_color_metadata(self, msg):
+        self.msg_d435_color_metadata.header = msg.header
+
+    def callback_gnss_fix(self, msg):
+        self.msg_gnss_fix = msg
+
+    def callback_gnss_navstatus(self, msg):
+        self.msg_gnss_navstatus = msg
+
+    def callback_gnss_nav_fix(self, msg):
+        self.msg_gnss_nav_fix = msg
+
+    def callback_gnss_nav_navstatus(self, msg):
+        self.msg_gnss_nav_navstatus = msg
+
+    def callback_mower_status(self, msg):
+        self.msg_mower_status = msg
+
+
+
+
+
+
+
+
+
+if __name__ == '__main__':
+    try:
+        rospy.init_node('device_state_publisher')
+        rospy.loginfo("<{}> Initialising...".format(rospy.get_caller_id()))
+        node = Node()
+        r = rospy.Rate(2)  # Hz
+
+        def signal_handler(signum, frame):
+            rospy.signal_shutdown("end")
+            sys.exit(0)
+        signal.signal(signal.SIGINT, signal_handler)
+
+        rospy.loginfo("<{}> Initialised".format(rospy.get_caller_id()))
+
+        while not rospy.is_shutdown():
+            node.check_messages_timeout()
+            node.set_ico_batt_status()
+            node.set_ico_supply_status()
+            node.set_ico_fan_ext_status()
+            node.set_ico_temp_ext_status()
+            node.set_ico_temp_int_status()
+            node.set_ico_fan_int_status()
+            node.set_ico_wifi_status()
+            node.set_ico_motors_status()
+            node.set_ico_imu_status()
+            node.set_ico_lidar_status()
+            node.set_ico_d435_status()
+            node.set_ico_gnss_status()
+            node.set_ico_gnss_nav_status()
+            node.set_ico_mower_status()
+
+            node.publish_icon_status()
+            r.sleep()
+
+    except rospy.ROSInterruptException:
+        rospy.logerr("<{}> Error!".format(rospy.get_caller_id()))

@@ -1,0 +1,18 @@
+[Unit]
+Description=Vitulus Service
+After=network-online.target sshd.service
+Wants=network-online.target
+#After=network-online.target
+
+[Service]
+Type=simple
+User=vitulus
+#Group=netdev
+#EnvironmentFile=/home/vitulus/catkin_ws/src/vitulus/vitulus/launch/vitulus.env
+WorkingDirectory=/home/vitulus
+ExecStart=/bin/bash --login -c 'source /home/vitulus/.bashrc; /home/vitulus/catkin_ws/src/vitulus/vitulus/launch/vitulus.startup'
+#Restart=always
+
+
+[Install]
+WantedBy=multi-user.target

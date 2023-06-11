@@ -1,0 +1,89 @@
+#!/usr/bin/env python
+import rospy
+import time
+from nav_msgs.msg import Odometry
+from std_msgs.msg import Bool, String
+from vitulus_ups.msg import vitulus_ups, power_status
+import actionlib
+from std_srvs.srv import EmptyRequest, Empty
+import roslaunch
+import os
+import sys
+import signal
+
+
+
+class LaunchFile:
+    def __init__(self, launchfile):
+        self.uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
+        roslaunch.configure_logging(self.uuid)
+        self.launch = roslaunch.parent.ROSLaunchParent(self.uuid, roslaunch_files=[launchfile])
+        self.launch.start()
+
+    def start(self):
+        self.launch.start()
+
+    def stop(self):
+        self.launch.shutdown()
+
+    def restart(self):
+        self.launch.shutdown()
+        self.launch.start()
+
+
+class MainNode:
+
+    def __init__(self):
+        self.core = None
+        self.pub_nextion_stat_txt = rospy.Publisher('/nextion/status_text', String, queue_size=10)
+        self.sub_restart = rospy.Subscriber("restart_core", String, self.callback_restart)
+        self.restart_string = "fuse"
+        self.robot_launch = LaunchFile("/home/vitulus/catkin_ws/src/vitulus/vitulus/launch/vitulus_start.launch")
+
+    # Publish text to Nextion status text box
+    def publish_nextion_stat_txt(self, txt):
+        msg = String()
+        msg.data = txt
+        self.pub_nextion_stat_txt.publish(msg)
+
+
+    def callback_restart(self, msg):
+        if (msg.data == "fuse"):
+            self.publish_nextion_stat_txt("Restarting...")
+            rospy.loginfo("<{}> Shutdown from message.{}".format(rospy.get_caller_id(), msg.data))
+            rospy.signal_shutdown("Shutdown from message.")
+
+
+if __name__ == '__main__':
+
+    try:
+        master = rospy.get_master()
+        master.getSystemState()
+        print('ROS core is running.')
+    except:
+        print('ROS core not running, so starting...')
+        uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
+        roslaunch.configure_logging(uuid)
+        core = roslaunch.parent.ROSLaunchParent(uuid, roslaunch_files=[], is_core=True)
+        core.start()
+
+    try:
+        rospy.init_node('main_node')
+        print(rospy.core.is_initialized())
+        rospy.loginfo("<{}> Initialising main_node...".format(rospy.get_caller_id()))
+        main_node = MainNode()
+        r = rospy.Rate(1)  # 1Hz
+
+        def signal_handler(signum, frame):
+            print(frame)
+            rospy.signal_shutdown("end")
+            sys.exit(0)
+        signal.signal(signal.SIGINT, signal_handler)
+
+        while not rospy.is_shutdown():
+            pass
+
+            r.sleep()
+
+    except rospy.ROSInterruptException:
+        rospy.loginfo(rospy.get_caller_id() + "  main_node error.")

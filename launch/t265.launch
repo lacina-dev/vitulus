@@ -1,0 +1,116 @@
+<!--
+Important Notice: For wheeled robots, odometer input is a requirement for robust
+and accurate tracking. The relevant APIs will be added to librealsense and
+ROS/realsense in upcoming releases. Currently, the API is available in the
+https://github.com/IntelRealSense/librealsense/blob/master/third-party/libtm/libtm/include/TrackingDevice.h#L508-L515.
+-->
+<launch>
+  <arg name="serial_no"           default="929122110818"/>
+<!--  <arg name="serial_no"           default=""/>-->
+  <arg name="usb_port_id"         default=""/>
+<!--  <arg name="usb_port_id"         default=""/>-->
+  <arg name="device_type"         default="t265"/>
+  <arg name="json_file_path"      default="/home/vitulus/catkin_ws/src/vitulus/vitulus/launch/includes/t2654WD1N.json"/>
+<!--  <arg name="json_file_path"      default=""/>-->
+  <arg name="camera"              default="t265"/>
+  <arg name="tf_prefix"           default="$(arg camera)"/>
+
+  <arg name="fisheye_width"       default="-1"/>
+  <arg name="fisheye_height"      default="-1"/>
+  <arg name="enable_fisheye1"     default="false"/>
+  <arg name="enable_fisheye2"     default="false"/>
+
+  <arg name="fisheye_fps"         default="-1"/>
+
+  <arg name="gyro_fps"            default="-1"/>
+  <arg name="accel_fps"           default="-1"/>
+  <arg name="enable_gyro"         default="true"/>
+  <arg name="enable_accel"        default="true"/>
+  <arg name="enable_pose"         default="true"/>
+
+  <arg name="enable_sync"           default="true"/>
+
+  <arg name="linear_accel_cov"      default="0.01"/>
+  <arg name="initial_reset"         default="false"/>
+  <arg name="unite_imu_method"      default=""/>
+
+  <arg name="publish_odom_tf"     default="false"/>
+
+  <arg name="publish_tf"               default="false"/>
+  <arg name="tf_publish_rate"          default="0"/> <!-- 0 - static transform -->
+
+<!--  <arg name="odom_frame_id"            default="$(arg tf_prefix)_odom_frame"/>-->
+  <arg name="odom_frame_id"            default="odom"/>
+
+  <arg name="topic_odom_in"            default="/mobile_base_controller/odom"/>
+<!--  <arg name="pose_frame_id"             default="$(arg tf_prefix)_pose_frame"/>-->
+  <arg name="pose_frame_id"             default="t265_link"/>
+<!--  <arg name="pose_frame_id"             default="base_footprint_t265"/>-->
+  <arg name="calib_odom_file"          default="/home/vitulus/catkin_ws/src/vitulus/vitulus_bringup/launch/includes/t2654WD1N.json"/>
+  <arg name="respawn"          default="true"/>
+
+
+  <group ns="$(arg camera)">
+    <include file="$(find realsense2_camera)/launch/includes/nodelet.launch.xml">
+      <arg name="tf_prefix"                value="$(arg tf_prefix)"/>
+      <arg name="serial_no"                value="$(arg serial_no)"/>
+      <arg name="usb_port_id"              value="$(arg usb_port_id)"/>
+      <arg name="device_type"              value="$(arg device_type)"/>
+      <arg name="json_file_path"           value="$(arg json_file_path)"/>
+
+      <arg name="enable_sync"              value="$(arg enable_sync)"/>
+
+      <arg name="fisheye_width"            value="$(arg fisheye_width)"/>
+      <arg name="fisheye_height"           value="$(arg fisheye_height)"/>
+      <arg name="enable_fisheye1"          value="$(arg enable_fisheye1)"/>
+      <arg name="enable_fisheye2"          value="$(arg enable_fisheye2)"/>
+
+      <arg name="fisheye_fps"              value="$(arg fisheye_fps)"/>
+      <arg name="gyro_fps"                 value="$(arg gyro_fps)"/>
+      <arg name="accel_fps"                value="$(arg accel_fps)"/>
+      <arg name="enable_gyro"              value="$(arg enable_gyro)"/>
+      <arg name="enable_accel"             value="$(arg enable_accel)"/>
+      <arg name="enable_pose"              value="$(arg enable_pose)"/>
+
+      <arg name="linear_accel_cov"         value="$(arg linear_accel_cov)"/>
+      <arg name="initial_reset"            value="$(arg initial_reset)"/>
+      <arg name="unite_imu_method"         value="$(arg unite_imu_method)"/>
+
+      <arg name="publish_odom_tf"          value="$(arg publish_odom_tf)"/>
+      <arg name="publish_tf"               value="$(arg publish_tf)"/>
+      <arg name="tf_publish_rate"          value="$(arg tf_publish_rate)"/>
+      <arg name="pose_frame_id"            value="$(arg pose_frame_id)"/>
+      <arg name="odom_frame_id"            value="$(arg odom_frame_id)"/>
+      <arg name="topic_odom_in"            value="$(arg topic_odom_in)"/>
+      <arg name="calib_odom_file"          value="$(arg calib_odom_file)"/>
+      <arg name="respawn"          value="$(arg respawn)"/>
+    </include>
+  </group>
+
+
+<!--  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find vitulus_bringup)/rviz/vitulus_t265.rviz" required="true" />-->
+
+  <rosparam>
+      /t265/tracking_module/enable_relocalization: false
+      /t265/tracking_module/enable_map_preservation: true
+      /t265/tracking_module/enable_pose_jumping: true
+      /t265/tracking_module/frames_queue_size: 32
+  </rosparam>
+
+<!--  <node pkg="tf" type="static_transform_publisher" name="t265_tf_publisher" args="-0.226 0 0.105 0 0 0 t265_pose_frame base_link 10"/>-->
+
+
+
+  <!--  <node pkg="tf" type="static_transform_publisher" name="t265_tf_publisher" args="-0.232 0 0.105 0 0 0 t265_pose_frame base_link 10"/>-->
+<!--  <node pkg="tf" type="static_transform_publisher" name="t265_tf_publisher" args="-0.232 0 0.105 3.14 0 0 t265_pose_frame base_link 10"/>-->
+<!--  <node pkg="tf" type="static_transform_publisher" name="t265_tf_publisher" args="0 0 0.105 3.14 0 0 t265_pose_frame base_link 10"/>-->
+<!--  <node pkg="tf" type="static_transform_publisher" name="t265_tf_publisher" args="-0.255 0 0.105 3.14 0 0 t265_pose_frame base_link 10"/>-->
+<!--  <node pkg="tf" type="static_transform_publisher" name="t265_tf_publisher" args="-0.255 0 0.105 3.14 0 0 t265_pose_frame base_link 10"/>-->
+
+
+  <!--  <node pkg="tf" type="static_transform_publisher" name="t265_tf_publisher" args="-0.30 0 0.105 3.14 0 0 t265_pose_frame base_link 10"/>-->
+<!--  <node pkg="tf" type="static_transform_publisher" name="t265_tf_publisher" args="-0.30 0 0.255 3.14 0 0 t265_pose_frame base_link 10"/>-->
+
+
+
+</launch>

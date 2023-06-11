@@ -1,0 +1,28 @@
+<launch>
+
+<!--    <include file="$(find vitulus)/launch/main.launch">-->
+<!--    <arg name="arg_name" value="$(arg arg_val)"/>-->
+<!--    </include>-->
+    <include file="$(find vitulus_ups)/launch/vitulus_ups.launch" />
+    <include file="$(find vitulus)/launch/device_state_publisher.launch" />
+    <include file="$(find vitulus)/launch/nextion_lcd.launch" />
+    <include file="$(find vitulus_nmcli)/launch/nmcli.launch" />
+    <include file="$(find vitulus_description)/launch/vitulus4wd.launch" />
+    <include file="$(find vitulus_imu)/launch/vitulus_imu.launch" />
+    <include file="$(find vitulus)/launch/rplidar.launch" />
+    <include file="$(find vitulus)/launch/d435.launch" />
+    <include file="$(find vitulus_base)/launch/base_control.launch" />
+    <include file="$(find vitulus)/launch/pcl_voxelgrid.launch"/>
+<!--    <include file="$(find vitulus)/launch/open_cr.launch"/>-->
+    <include file="$(find vitulus_gnss)/launch/vitulus_ardusimple.launch"/>
+    <include file="$(find vitulus_gnss)/launch/vitulus_ardusimple_lite.launch"/>
+    <include file="$(find vitulus_webui)/launch/vitulus_webui.launch"/>
+    <include file="$(find vitulus_mower)/launch/mower.launch"/>
+
+
+
+<!--    ##### Show in Rviz #####-->
+
+<!--    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find vitulus)/rviz/vitulus.rviz" required="false" />-->
+
+</launch>

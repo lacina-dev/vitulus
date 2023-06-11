@@ -1,0 +1,747 @@
+#!/usr/bin/env python
+import rospy
+import time
+from datetime import datetime
+from std_msgs.msg import Bool, String, Int16
+from vitulus_msgs.msg import NmConn, NmSsid, NmSsidList, NmConnDetail, NmConnAdd
+from vitulus_msgs.msg import vitulus_ups, Power_status
+from vitulus_msgs.msg import Device_icon_status
+import sys
+import signal
+import serial
+import struct
+from std_srvs.srv import EmptyRequest, Empty
+
+PAGE_INTRO = 0
+PAGE_QR_ANDROID = 10
+PAGE_QR_WEBUI = 11
+PAGE_CONNECT_ME = 12
+PAGE_QR_DOCS = 13
+PAGE_ABOUT = 14
+PAGE_MAIN = 1
+PAGE_POWER_MODULE = 16
+PAGE_INFO_ANDROID = 10
+PAGE_INFO_WEUI = 11
+
+PAGE_WIFI = 4
+PAGE_ACT_CON = 5
+PAGE_ADD_CON = 6
+PAGE_CONN = 7
+PAGE_SCAN = 8
+PAGE_DEL_CON = 9
+
+
+class Node:
+
+    def __init__(self):
+        self.connections_list = []
+        self.ssid_list = []
+        self.ssid_list_str = ''
+        self.connection_detail = []
+        self.connection_detail_str = ''
+        self.connection_detail_ip = ''
+        self.msg_pm_ups = vitulus_ups()
+        self.msg_pm_power_status = Power_status()
+
+
+        self.msg_icon_status = Device_icon_status()
+        self.msg_icon_status.supply = "DISABLED"
+        self.msg_icon_status.batt = "DISABLED"
+        self.msg_icon_status.fan_int = "DISABLED"
+        self.msg_icon_status.temp_int = "DISABLED"
+        self.msg_icon_status.fan_ext = "DISABLED"
+        self.msg_icon_status.temp_ext = "DISABLED"
+        self.msg_icon_status.mot_lf = "DISABLED"
+        self.msg_icon_status.mot_rf = "DISABLED"
+        self.msg_icon_status.mot_lr = "DISABLED"
+        self.msg_icon_status.mot_rr = "DISABLED"
+        self.msg_icon_status.mower = "DISABLED"
+        self.msg_icon_status.imu = "DISABLED"
+        self.msg_icon_status.gnss_nav = "DISABLED"
+        self.msg_icon_status.gnss = "DISABLED"
+        self.msg_icon_status.wifi = "DISABLED"
+
+        self.pub_conn_add = rospy.Publisher('/nmcli/conn_add', NmConnAdd, queue_size=10)
+        self.pub_conn_del = rospy.Publisher('/nmcli/conn_del', String, queue_size=10)
+        self.pub_conn_activate = rospy.Publisher('/nmcli/conn_activate', String, queue_size=10)
+        self.pub_scan_ap = rospy.Publisher('/nmcli/scan_ap', Bool, queue_size=10)
+        self.pub_disconnect_wifi = rospy.Publisher('/nmcli/disconnect_wifi', Bool, queue_size=10)
+        self.pub_pm_play_melody = rospy.Publisher('/pm/play_melody', Int16, queue_size=10)
+        self.pub_base_motor_power = rospy.Publisher('/base/motor_power', Bool, queue_size=10)
+
+        self.sub_nmcli_conn_list = rospy.Subscriber("/nmcli/conn_list", NmConn, self.callback_nmcli_conn_list)
+        self.sub_nmcli_conn_detail = rospy.Subscriber("/nmcli/conn_detail", NmConnDetail, self.callback_nmcli_conn_detail)
+        self.sub_nmcli_ssid_list = rospy.Subscriber("/nmcli/ssid_list", NmSsidList, self.callback_nmcli_ssid_list)
+        self.sub_pm_power_status = rospy.Subscriber("/pm/power_status", Power_status, self.callback_pm_power_status)
+        self.sub_pm_ups = rospy.Subscriber("/pm/ups", vitulus_ups, self.callback_pm_ups)
+        self.sub_nextion_status_text = rospy.Subscriber("status_text", String, self.callback_nextion_status_text)
+        self.sub_icon_status = rospy.Subscriber("/device_state_pub/icon_status", Device_icon_status, self.callback_icon_status)
+
+        self.eof = "\xff\xff\xff"
+        self.no_brightnes = "dim=0"
+        self.full_brightnes = "dim=100"
+        self.current_page = 0
+
+        self.init_nextion()
+        self.timer_read_serial = rospy.Timer(rospy.Duration(1.0 / 5), self.read_serial)
+
+
+    def publish_base_motor_power(self, status):
+        msg = Bool()
+        msg.data = status
+        self.pub_base_motor_power.publish(msg)
+
+    def publish_conn_add(self, ssid, password):
+        msg = NmConnAdd()
+        msg.ssid = ssid
+        msg.psk_password = password
+        self.pub_conn_add.publish(msg)
+
+    def publish_conn_del(self, conn_name):
+        if (conn_name in self.connections_list):
+            msg = String()
+            msg.data = conn_name
+            self.pub_conn_del.publish(msg)
+
+    def publish_conn_activate(self, conn_name):
+        if (conn_name in self.connections_list):
+            msg = String()
+            msg.data = conn_name
+            self.pub_conn_activate.publish(msg)
+
+    def publish_scan_ap(self):
+        msg = Bool()
+        msg.data = True
+        self.pub_scan_ap.publish(msg)
+
+    def publish_disconnect_wifi(self):
+        msg = Bool()
+        msg.data = True
+        self.pub_disconnect_wifi.publish(msg)
+
+    def publish_pm_play_melody(self, melody_id):
+        msg = Int16()
+        msg.data = int(melody_id) # 5:short_beep, 1:beep, 2:double beep,
+        self.pub_pm_play_melody.publish(msg)
+
+    def callback_nmcli_conn_list(self, msg):
+        self.connections_list = msg.connections
+
+    def callback_nmcli_conn_detail(self, msg):
+        self.connection_detail = msg
+        if (msg.status == "Connected"):
+            self.connection_detail_str = "Status: {}\n".format(msg.status)
+            self.connection_detail_str += "SSID: {}\n".format(msg.ssid)
+            self.connection_detail_str += "Mode: {}\n".format(msg.mode)
+            self.connection_detail_str += "Method: {}\n".format(msg.method)
+            for ip in msg.addresses:
+                self.connection_detail_str += "IP: {}\n".format(ip)
+                self.connection_detail_ip = (ip.split(" ")[0]).split("/")[0]
+            for rt in msg.routes:
+                self.connection_detail_str += "ROUTE: {}\n".format(rt)
+            for dns in msg.dns:
+                self.connection_detail_str += "DNS: {}\n".format(dns)
+        else:
+            self.connection_detail_str = "Wifi {}".format(msg.status)
+
+    def callback_nmcli_ssid_list(self, msg):
+        self.ssid_list = msg.ssid_list
+        ssid_list_str_b = ''
+        ssid_list_str_b += "{: <36}  {: <4}      {: <3}\r\n".format(str("SSID"), str("FREQ"), str("PWR"))
+        ssid_list_b = []
+        for ssid in msg.ssid_list:
+            ssid_list_str_b += "{:~<36}  {: <4} MHz {: >3}%\r\n".format(ssid.ssid, str(ssid.freq), str(ssid.signal))
+            ssid_list_b.append(ssid.ssid)
+        self.ssid_list_str = ssid_list_str_b
+        self.ssid_list = ssid_list_b
+
+    def callback_pm_power_status(self, msg):
+        self.msg_pm_power_status = msg
+
+    def callback_pm_ups(self, msg):
+        self.msg_pm_ups = msg
+
+    # callback text to write to status text box on main page
+    def callback_nextion_status_text(self, msg):
+        self.nextion_write_status_text = msg.data
+
+    # callback icon status
+    def callback_icon_status(self, msg):
+        self.msg_icon_status = msg
+
+    # write to status text box on main page
+    def nextion_write_status_text(self, text):
+        self.port.write(('page0.t1.txt="{}"{}'.format(text, self.eof)).encode('iso8859_1'))  # Status text
+
+    def init_nextion(self):
+        rospy.loginfo("<{}> Connecting to nextion serial 9600 baud.".format(rospy.get_caller_id()))
+        self.port = serial.Serial(port='/dev/nextion', baudrate=9600, timeout=1.0)
+        self.port.write((self.no_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 0%
+        self.port.write((self.no_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 0%
+        time.sleep(1)
+        self.port.write(("baud=115200" + self.eof).encode('iso8859_1'))
+        self.port.close()
+        rospy.loginfo("<{}> Nextion serial closed.".format(rospy.get_caller_id()))
+        time.sleep(0.15)
+        rospy.loginfo("<{}> Connecting to nextion serial 115200 baud.".format(rospy.get_caller_id()))
+        self.port = serial.Serial(port='/dev/nextion', baudrate=115200, timeout=1.0)
+        self.port.write((self.no_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 0%
+        self.port.write((self.no_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 0%
+        time.sleep(1)
+        self.port.write((self.full_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 100%
+        self.port.write((self.full_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 100%
+        rospy.loginfo("<{}> Nextion serial connected.".format(rospy.get_caller_id()))
+
+    def read_serial(self, event=False):
+        # print(event)
+        bytesToRead = self.port.inWaiting()
+        if bytesToRead > 0:
+            data = self.port.read(bytesToRead)
+            data = data.split(b"\xff\xff\xff")
+            for message in data:
+                if len(message) > 0:
+                    message_type = chr(message[0])
+                    # print(message_type)
+                    if message_type == 'q':  # If is current page message
+                        # print(message)
+                        try:
+                            data1 = struct.unpack("BBBBB", message)
+                            self.current_page = data1[1]
+                            # print("Page id: {}".format(self.current_page))
+
+                        except:
+                            # print("Serial data reading problem")
+                            data1 = struct.unpack("cBBB", message)
+                            self.current_page = data1[1]
+                            # print("Page id: {} data1: {} data2: {} data3: {} ".format(self.current_page, data1[1], data1[2], data1[3]))
+
+
+                    if message_type == 'e':  # If is button message
+                        data = struct.unpack("cBBB", message)
+                        screen = data[1]
+                        id = data[2]
+                        action = data[3]
+                        print("screen: {} \tid: {} \t action: {} ".format(screen, id, action))
+                        self.publish_pm_play_melody(5)
+
+                    if message_type == 'p':  # If is string message
+                        nexmsg = message[1:].decode().split("|")
+                        print(nexmsg[0])
+                        self.string_event(nexmsg)
+
+    def string_event(self, message):
+        # Scan wireless network
+        if message[0] == "SCANWIFI":
+            self.publish_scan_ap()
+        # Disconnect wireless network
+        if message[0] == "DISCONECTWIFI":
+            self.publish_disconnect_wifi()
+
+        # Add new nm connection
+        if message[0] == "ADDCON":
+            if message[1] in self.connections_list:
+                self.port.write(('page7.t5.txt="Connection exist!"{}'.format(self.eof)).encode('iso8859_1'))
+            else:
+                self.publish_conn_add(message[1], message[2])
+                self.port.write(('page7.t5.txt="Successfully added."{}'.format(self.eof)).encode('iso8859_1'))
+        # Remove nm connection
+        if message[0] == "REMCON":
+            self.publish_conn_del(message[1])
+            self.port.write(('page10.t5.txt="Connection removed."{}'.format(self.eof)).encode('iso8859_1'))
+        if message[0] == "ACTCON":
+            self.publish_conn_activate(message[1])
+        if message[0] == "APPQR":
+            self.port.write(('qr_android.qr0.txt="http://{}:11311"{}'.format(self.connection_detail_ip, self.eof)).encode('iso8859_1'))
+            self.port.write(('vis qr0,1{}'.format(self.eof)).encode('iso8859_1'))
+        if message[0] == "WEBQR":
+            self.port.write(('qr_webui.qr0.txt="http://{}:7777"{}'.format(self.connection_detail_ip, self.eof)).encode('iso8859_1'))
+            self.port.write(('vis qr0,1{}'.format(self.eof)).encode('iso8859_1'))
+        if message[0] == "LIDON":
+            rospy.wait_for_service('/start_motor')
+            try:
+                srvs = rospy.ServiceProxy('/start_motor', Empty)
+                srsmsg = EmptyRequest()
+                resp = srvs(srsmsg)
+            except rospy.ServiceException as e:
+                print("Service call failed: %s" % e)
+        if message[0] == "LIDOFF":
+            rospy.wait_for_service('/stop_motor')
+            try:
+                srvs = rospy.ServiceProxy('/stop_motor', Empty)
+                srsmsg = EmptyRequest()
+                resp = srvs(srsmsg)
+                print(resp)
+            except rospy.ServiceException as e:
+                print("Service call failed: %s" % e)
+
+        if message[0] == "MOTON":
+            self.publish_base_motor_power(True)
+        if message[0] == "MOTOFF":
+            self.publish_base_motor_power(False)
+
+    def nextion_write_icons(self):
+
+        #### Power supply icon
+        SUPPLY_GREY = 74
+        SUPPLY_GREEN = 73
+        SUPPLY_ORANGE = 75
+        SUPPLY_RED = 76
+        if (self.msg_icon_status.supply == "ONLINE"):
+            self.port.write(('main.supply.pic={}{}'.format(SUPPLY_GREEN, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.supply == "FAIL"):
+            self.port.write(('main.supply.pic={}{}'.format(SUPPLY_RED, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.supply == "OFFLINE"):
+            self.port.write(('main.supply.pic={}{}'.format(SUPPLY_GREY, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.supply == "DISABLED"):
+            self.port.write(('main.supply.pic={}{}'.format(SUPPLY_GREY, self.eof)).encode('iso8859_1'))
+
+        #### Fan icons, PCB and Power unit.
+        FAN_PCB_GREY = 38
+        FAN_PCB_GREEN = 37
+        FAN_PCB_ORANGE = 39
+        FAN_PCB_RED = 40
+        FAN_GREY = 34
+        FAN_GREEN = 33
+        FAN_ORANGE = 35
+        FAN_RED = 36
+        # Fan on PCB
+        if (self.msg_icon_status.fan_int == "ON"):
+            self.port.write(('main.fan_int.pic={}{}'.format(FAN_PCB_GREEN, self.eof)).encode('iso8859_1'))
+            self.port.write(('power_module.ico_fan_pcb.pic={}{}'.format(FAN_PCB_GREEN, self.eof)).encode('iso8859_1'))
+        else:
+            self.port.write(('main.fan_int.pic={}{}'.format(FAN_PCB_GREY, self.eof)).encode('iso8859_1'))
+            self.port.write(('power_module.ico_fan_pcb.pic={}{}'.format(FAN_PCB_GREY, self.eof)).encode('iso8859_1'))
+        # Fan in Power unit
+        if (self.msg_icon_status.fan_ext == "ON"):
+            self.port.write(('main.fan_ext.pic={}{}'.format(FAN_GREEN, self.eof)).encode('iso8859_1'))
+            self.port.write(('power_module.ico_fan_ext.pic={}{}'.format(FAN_GREEN, self.eof)).encode('iso8859_1'))
+        else:
+            self.port.write(('main.fan_ext.pic={}{}'.format(FAN_GREY, self.eof)).encode('iso8859_1'))
+            self.port.write(('power_module.ico_fan_ext.pic={}{}'.format(FAN_PCB_GREY, self.eof)).encode('iso8859_1'))
+
+        #### Battery icon.
+        BATT_FULL = 25
+        BATT_75 = 22
+        BATT_50 = 26
+        BATT_25 = 21
+        BATT_EMPTY = 24
+        BATT_DISABLED = 23
+        BATT_CHARGE_FULL = 31
+        BATT_CHARGE_75 = 28
+        BATT_CHARGE_50 = 32
+        BATT_CHARGE_25 = 27
+        BATT_CHARGE_EMPTY = 30
+        BATT_CHARGE_DISABLED = 29
+
+        if (self.msg_icon_status.batt == "FULL"):
+            self.port.write(('main.batt.pic={}{}'.format(BATT_FULL, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "75"):
+            self.port.write(('main.batt.pic={}{}'.format(BATT_75, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "50"):
+            self.port.write(('main.batt.pic={}{}'.format(BATT_50, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "25"):
+            self.port.write(('main.batt.pic={}{}'.format(BATT_25, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "EMPTY"):
+            self.port.write(('main.batt.pic={}{}'.format(BATT_EMPTY, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "DISABLED"):
+            self.port.write(('main.batt.pic={}{}'.format(BATT_DISABLED, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "FULL_CHARGE"):
+            self.port.write(('main.batt.pic={}{}'.format(BATT_CHARGE_FULL, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "75_CHARGE"):
+            self.port.write(('main.batt.pic={}{}'.format(BATT_CHARGE_75, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "50_CHARGE"):
+            self.port.write(('main.batt.pic={}{}'.format(BATT_CHARGE_50, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "25_CHARGE"):
+            self.port.write(('main.batt.pic={}{}'.format(BATT_CHARGE_25, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "EMPTY_CHARGE"):
+            self.port.write(('main.batt.pic={}{}'.format(BATT_CHARGE_EMPTY, self.eof)).encode('iso8859_1'))
+
+        #### Temp PCB and Power unit icons.
+        TEMP_GREY = 78
+        TEMP_GREEN = 77
+        TEMP_ORANGE = 79
+        TEMP_RED = 80
+        TEMP_PCB_GREY = 82
+        TEMP_PCB_GREEN = 81
+        TEMP_PCB_ORANGE = 83
+        TEMP_PCB_RED = 84
+        # temp in PCB
+        if (self.msg_icon_status.temp_int == "OK"):
+            self.port.write(('main.temp.pic={}{}'.format(TEMP_PCB_GREEN, self.eof)).encode('iso8859_1'))
+            self.port.write(('power_module.ico_temp_pcb.pic={}{}'.format(TEMP_PCB_GREEN, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.temp_int == "WARM"):
+            self.port.write(('main.temp.pic={}{}'.format(TEMP_PCB_ORANGE, self.eof)).encode('iso8859_1'))
+            self.port.write(('power_module.ico_temp_pcb.pic={}{}'.format(TEMP_PCB_ORANGE, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.temp_int == "HOT"):
+            self.port.write(('main.temp.pic={}{}'.format(TEMP_PCB_RED, self.eof)).encode('iso8859_1'))
+            self.port.write(('power_module.ico_temp_pcb.pic={}{}'.format(TEMP_PCB_RED, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.temp_int == "DISABLED"):
+            self.port.write(('main.temp.pic={}{}'.format(TEMP_PCB_GREY, self.eof)).encode('iso8859_1'))
+            self.port.write(('power_module.ico_temp_pcb.pic={}{}'.format(TEMP_PCB_GREY, self.eof)).encode('iso8859_1'))
+        # temp on Power unit
+        if (self.msg_icon_status.temp_ext == "OK"):
+            self.port.write(('main.temp_ext.pic={}{}'.format(TEMP_GREEN, self.eof)).encode('iso8859_1'))
+            self.port.write(('power_module.ico_temp_ext.pic={}{}'.format(TEMP_GREEN, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.temp_ext == "WARM"):
+            self.port.write(('main.temp_ext.pic={}{}'.format(TEMP_ORANGE, self.eof)).encode('iso8859_1'))
+            self.port.write(('power_module.ico_temp_ext.pic={}{}'.format(TEMP_ORANGE, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.temp_ext == "HOT"):
+            self.port.write(('main.temp_ext.pic={}{}'.format(TEMP_RED, self.eof)).encode('iso8859_1'))
+            self.port.write(('power_module.ico_temp_ext.pic={}{}'.format(TEMP_RED, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.temp_ext == "DISABLED"):
+            self.port.write(('main.temp_ext.pic={}{}'.format(TEMP_GREY, self.eof)).encode('iso8859_1'))
+            self.port.write(('power_module.ico_temp_ext.pic={}{}'.format(TEMP_GREY, self.eof)).encode('iso8859_1'))
+
+        #### WiFi icon.
+        WIFI_GREY = 86
+        WIFI_GREEN = 85
+        WIFI_ORANGE = 87
+        WIFI_RED = 88
+        if (self.msg_icon_status.wifi == "FINE"):
+            self.port.write(('main.wifi.pic={}{}'.format(WIFI_GREEN, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.wifi == "MEDIUM"):
+            self.port.write(('main.wifi.pic={}{}'.format(WIFI_ORANGE, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.wifi == "BAD"):
+            self.port.write(('main.wifi.pic={}{}'.format(WIFI_RED, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.wifi == "DISABLED"):
+            self.port.write(('main.wifi.pic={}{}'.format(WIFI_GREY, self.eof)).encode('iso8859_1'))
+
+
+        #### Motor controler icons.
+        # Front left controller
+        FL_OK = 53
+        FL_WARM = 55
+        FL_HOT = 56
+        FL_DISABLED = 54
+        if (self.msg_icon_status.mot_lf == "OK"):
+            self.port.write(('main.mot_lf.pic={}{}'.format(FL_OK, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mot_lf == "WARM"):
+            self.port.write(('main.mot_lf.pic={}{}'.format(FL_WARM, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mot_lf == "HOT"):
+            self.port.write(('main.mot_lf.pic={}{}'.format(FL_HOT, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mot_lf == "DISABLED"):
+            self.port.write(('main.mot_lf.pic={}{}'.format(FL_DISABLED, self.eof)).encode('iso8859_1'))
+
+        # Front right controller
+        FR_OK = 61
+        FR_WARM = 63
+        FR_HOT = 64
+        FR_DISABLED = 62
+        if (self.msg_icon_status.mot_rf == "OK"):
+            self.port.write(('main.mot_rf.pic={}{}'.format(FR_OK, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mot_rf == "WARM"):
+            self.port.write(('main.mot_rf.pic={}{}'.format(FR_WARM, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mot_rf == "HOT"):
+            self.port.write(('main.mot_rf.pic={}{}'.format(FR_HOT, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mot_rf == "DISABLED"):
+            self.port.write(('main.mot_rf.pic={}{}'.format(FR_DISABLED, self.eof)).encode('iso8859_1'))
+
+        # Rear left controller
+        RL_OK = 57
+        RL_WARM = 59
+        RL_HOT = 60
+        RL_DISABLED = 58
+        if (self.msg_icon_status.mot_lr == "OK"):
+            self.port.write(('main.mot_lr.pic={}{}'.format(RL_OK, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mot_lr == "WARM"):
+            self.port.write(('main.mot_lr.pic={}{}'.format(RL_WARM, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mot_lr == "HOT"):
+            self.port.write(('main.mot_lr.pic={}{}'.format(RL_HOT, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mot_lr == "DISABLED"):
+            self.port.write(('main.mot_lr.pic={}{}'.format(RL_DISABLED, self.eof)).encode('iso8859_1'))
+
+        # Rear right controller
+        RR_OK = 65
+        RR_WARM = 67
+        RR_HOT = 68
+        RR_DISABLED = 66
+        if (self.msg_icon_status.mot_rr == "OK"):
+            self.port.write(('main.mot_rr.pic={}{}'.format(RR_OK, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mot_rr == "WARM"):
+            self.port.write(('main.mot_rr.pic={}{}'.format(RR_WARM, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mot_rr == "HOT"):
+            self.port.write(('main.mot_rr.pic={}{}'.format(RR_HOT, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mot_rr == "DISABLED"):
+            self.port.write(('main.mot_rr.pic={}{}'.format(RR_DISABLED, self.eof)).encode('iso8859_1'))
+
+        # Imu
+        IMU_GREEN = 49
+        IMU_ORANGE =  51
+        IMU_RED = 52
+        IMU_DISABLED = 50
+        if (self.msg_icon_status.imu == "ON"):
+            self.port.write(('main.imu.pic={}{}'.format(IMU_GREEN, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.imu == "OFF"):
+            self.port.write(('main.imu.pic={}{}'.format(IMU_RED, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.imu == "DISABLED"):
+            self.port.write(('main.imu.pic={}{}'.format(IMU_DISABLED, self.eof)).encode('iso8859_1'))
+
+        # Lidar
+        LIDAR_GREEN = 103
+        LIDAR_ORANGE = 105
+        LIDAR_RED = 106
+        LIDAR_DISABLED = 104
+        if (self.msg_icon_status.lidar == "ON"):
+            self.port.write(('main.lidar.pic={}{}'.format(LIDAR_GREEN, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.lidar == "OFF"):
+            self.port.write(('main.lidar.pic={}{}'.format(LIDAR_DISABLED, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.lidar == "DISABLED"):
+            self.port.write(('main.lidar.pic={}{}'.format(LIDAR_DISABLED, self.eof)).encode('iso8859_1'))
+
+        # D435
+        D435_GREEN = 99
+        D435_ORANGE = 101
+        D435_RED = 102
+        D435_DISABLED = 100
+        if (self.msg_icon_status.d435 == "ON"):
+            self.port.write(('main.d435.pic={}{}'.format(D435_GREEN, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.d435 == "OFF"):
+            self.port.write(('main.d435.pic={}{}'.format(D435_DISABLED, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.d435 == "DISABLED"):
+            self.port.write(('main.d435.pic={}{}'.format(D435_DISABLED, self.eof)).encode('iso8859_1'))
+
+        # GPS
+        GPS_GREEN = 41
+        GPS_ORANGE = 43
+        GPS_RED = 44
+        GPS_DISABLED = 42
+        if (self.msg_icon_status.gnss == "RTK"):
+            self.port.write(('main.gnss.pic={}{}'.format(GPS_GREEN, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.gnss == "3DFIX"):
+            self.port.write(('main.gnss.pic={}{}'.format(GPS_ORANGE, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.gnss == "BAD"):
+            self.port.write(('main.gnss.pic={}{}'.format(GPS_RED, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.gnss == "DISABLED"):
+            self.port.write(('main.gnss.pic={}{}'.format(GPS_DISABLED, self.eof)).encode('iso8859_1'))
+
+
+        # GPS_NAV
+        GPS_NAV_GREEN = 45
+        GPS_NAV_ORANGE = 47
+        GPS_NAV_RED = 48
+        GPS_NAV_DISABLED = 46
+        if (self.msg_icon_status.gnss_nav == "RTK"):
+            self.port.write(('main.gnss_nav.pic={}{}'.format(GPS_NAV_GREEN, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.gnss_nav == "3DFIX"):
+            self.port.write(('main.gnss_nav.pic={}{}'.format(GPS_NAV_ORANGE, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.gnss_nav == "BAD"):
+            self.port.write(('main.gnss_nav.pic={}{}'.format(GPS_NAV_RED, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.gnss_nav == "DISABLED"):
+            self.port.write(('main.gnss_nav.pic={}{}'.format(GPS_NAV_DISABLED, self.eof)).encode('iso8859_1'))
+
+
+        # MOWER
+        MOWER_GREEN = 69
+        MOWER_ORANGE = 72
+        MOWER_RED = 71
+        MOWER_DISABLED = 70
+        if (self.msg_icon_status.mower == "ON"):
+            self.port.write(('main.mower.pic={}{}'.format(MOWER_GREEN, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mower == "BUSY"):
+            self.port.write(('main.mower.pic={}{}'.format(MOWER_ORANGE, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mower == "ERROR"):
+            self.port.write(('main.mower.pic={}{}'.format(MOWER_RED, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.mower == "DISABLED"):
+            self.port.write(('main.mower.pic={}{}'.format(MOWER_DISABLED, self.eof)).encode('iso8859_1'))
+
+
+
+
+    def nextion_power_module(self):
+        self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+
+        ## POWER MODULE
+        BACKGROUND_GREY = 89
+        BACKGROUND_GREEN = 90
+        BACKGROUND_ORANGE = 91
+        BACKGROUND_RED = 92
+
+        GREEN_COLOR = 2017
+        ORANGE_COLOR = 64992
+        RED_COLOR = 63494
+        GREY_COLOR = 42292
+
+        # Temps and fans
+        self.port.write(
+            ('power_module.temp_ext.txt="{:2.1f} °C"{}'.format(self.msg_pm_power_status.temp, self.eof)).encode('iso8859_1'))
+        self.port.write(
+            ('power_module.fan_ext.txt="{} rpm"{}'.format(self.msg_pm_power_status.fan_rpm, self.eof)).encode('iso8859_1'))
+        self.port.write(
+            ('power_module.temp_pcb.txt="{:2.1f} °C"{}'.format(self.msg_pm_power_status.temp2, self.eof)).encode('iso8859_1'))
+        self.port.write(
+            ('power_module.fan_pcb.txt="{} rpm"{}'.format(self.msg_pm_power_status.fan2_rpm, self.eof)).encode('iso8859_1'))
+
+        # Voltages and amps
+        self.port.write(
+            ('power_module.input_v.txt="{:2.1f}V"{}'.format(self.msg_pm_power_status.input_voltage, self.eof)).encode('iso8859_1'))
+        self.port.write(
+            ('power_module.input_a.txt="{:2.1f}A"{}'.format(self.msg_pm_power_status.input_current, self.eof)).encode('iso8859_1'))
+        self.port.write(
+            ('power_module.batt_in_v.txt="{:2.1f}V"{}'.format(self.msg_pm_power_status.battery_voltage, self.eof)).encode('iso8859_1'))
+        self.port.write(
+            ('power_module.batt_in_a.txt="{:2.1f}A"{}'.format(self.msg_pm_power_status.battery_charge_current, self.eof)).encode('iso8859_1'))
+        self.port.write(
+            ('power_module.batt_out_v.txt="{:2.1f}V"{}'.format(self.msg_pm_power_status.battery_voltage, self.eof)).encode('iso8859_1'))
+        self.port.write(
+            ('power_module.batt_out_a.txt="{:2.1f}A"{}'.format(self.msg_pm_power_status.battery_discharge_current, self.eof)).encode('iso8859_1'))
+        self.port.write(
+            ('power_module.nuc_v.txt="{:2.1f}V"{}'.format(self.msg_pm_power_status.out19_voltage, self.eof)).encode('iso8859_1'))
+        self.port.write(
+            ('power_module.nuc_a.txt="{:2.1f}A"{}'.format(self.msg_pm_power_status.out19_current, self.eof)).encode('iso8859_1'))
+
+        # Capacity
+        # FULL, 75, 50, 25, EMPTY, DISABLED
+        self.port.write(
+            ('power_module.batt_cap.txt="{}%"{}'.format(self.msg_pm_power_status.battery_capacity, self.eof)).encode('iso8859_1'))
+        self.port.write(
+            ('power_module.j0.val={}{}'.format(self.msg_pm_power_status.battery_capacity, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "FULL" or self.msg_icon_status.batt == "FULL_CHARGE"):
+            self.port.write(('power_module.j0.pco={}{}'.format(GREEN_COLOR, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "75" or self.msg_icon_status.batt == "75_CHARGE"):
+            self.port.write(('power_module.j0.pco={}{}'.format(GREEN_COLOR, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "50" or self.msg_icon_status.batt == "50_CHARGE"):
+            self.port.write(('power_module.j0.pco={}{}'.format(ORANGE_COLOR, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "25" or self.msg_icon_status.batt == "25_CHARGE"):
+            self.port.write(('power_module.j0.pco={}{}'.format(RED_COLOR, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "EMPTY" or self.msg_icon_status.batt == "EMPTY_CHARGE"):
+            self.port.write(('power_module.j0.pco={}{}'.format(RED_COLOR, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.batt == "DISABLED"):
+            self.port.write(('power_module.j0.pco={}{}'.format(GREY_COLOR, self.eof)).encode('iso8859_1'))
+
+        # Charger
+        self.port.write(
+            ('power_module.chrg_stat.txt="{}"{}'.format(self.msg_pm_power_status.charger_status, self.eof)).encode('iso8859_1'))
+        if (self.msg_pm_power_status.charger_status == "CHARGED"):
+            self.port.write(('power_module.charger.picc={}{}'.format(BACKGROUND_GREEN, self.eof)).encode('iso8859_1'))
+        if (self.msg_pm_power_status.charger_status == "CHARGING"):
+            self.port.write(('power_module.charger.picc={}{}'.format(BACKGROUND_ORANGE, self.eof)).encode('iso8859_1'))
+        if (self.msg_pm_power_status.charger_status == "DISCHARGING"):
+            self.port.write(('power_module.charger.picc={}{}'.format(BACKGROUND_GREY, self.eof)).encode('iso8859_1'))
+
+        # Input
+        if (self.msg_icon_status.supply == "ONLINE"):
+            self.port.write(('power_module.input.picc={}{}'.format(BACKGROUND_GREEN, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.supply == "FAIL"):
+            self.port.write(('power_module.input.picc={}{}'.format(BACKGROUND_RED, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.supply == "OFFLINE"):
+            self.port.write(('power_module.input.picc={}{}'.format(BACKGROUND_GREY, self.eof)).encode('iso8859_1'))
+        if (self.msg_icon_status.supply == "DISABLED"):
+            self.port.write(('power_module.input.picc={}{}'.format(BACKGROUND_GREY, self.eof)).encode('iso8859_1'))
+
+        # Batt output
+        if (self.msg_pm_power_status.bat_out_switch):
+            self.port.write(('power_module.batt_out.picc={}{}'.format(BACKGROUND_GREEN, self.eof)).encode('iso8859_1'))
+        else:
+            self.port.write(('power_module.batt_out.picc={}{}'.format(BACKGROUND_GREY, self.eof)).encode('iso8859_1'))
+        # Motor output
+        if (self.msg_pm_power_status.motor_out_switch):
+            self.port.write(('power_module.motors.picc={}{}'.format(BACKGROUND_GREEN, self.eof)).encode('iso8859_1'))
+        else:
+            self.port.write(('power_module.motors.picc={}{}'.format(BACKGROUND_GREY, self.eof)).encode('iso8859_1'))
+        # NUC output
+        if (self.msg_pm_power_status.out19v_switch):
+            self.port.write(('power_module.nuc.picc={}{}'.format(BACKGROUND_GREEN, self.eof)).encode('iso8859_1'))
+        else:
+            self.port.write(('power_module.nuc.picc={}{}'.format(BACKGROUND_GREY, self.eof)).encode('iso8859_1'))
+        # 19V converter
+        if (self.msg_pm_power_status.enable19v_switch):
+            self.port.write(('power_module.converter.picc={}{}'.format(BACKGROUND_GREEN, self.eof)).encode('iso8859_1'))
+        else:
+            self.port.write(('power_module.converter.picc={}{}'.format(BACKGROUND_GREY, self.eof)).encode('iso8859_1'))
+
+    def nextion_write_wifi(self):
+        self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+
+        # WiFi
+        if self.current_page == PAGE_WIFI:
+            self.port.write(('wifi.status.txt="{}"{}'.format(self.connection_detail.status, self.eof)).encode('iso8859_1'))
+            if (self.connection_detail.status == "Connected"):
+                self.port.write(('wifi.ip.txt="{}"{}'.format(self.connection_detail_ip, self.eof)).encode('iso8859_1'))
+                self.port.write(('wifi.ssid.txt="{}"{}'.format(self.connection_detail.ssid, self.eof)).encode('iso8859_1'))
+            else:
+                self.port.write(('wifi.ip.txt="{}"{}'.format("", self.eof)).encode('iso8859_1'))
+                self.port.write(('wifi.ssid.txt="{}"{}'.format("", self.eof)).encode('iso8859_1'))
+
+        if self.current_page == PAGE_CONN:
+            self.port.write(
+                ('wifi_conn.conn_detail.txt="{}"{}'.format(self.connection_detail_str.replace('\n', '\r\n'), self.eof)).encode(
+                    'iso8859_1'))
+
+        if self.current_page == PAGE_SCAN:
+            self.port.write(('wifi_scan.scan.txt="{}"{}'.format(self.ssid_list_str, self.eof)).encode(
+                'iso8859_1'))
+
+        self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+
+        if self.current_page == PAGE_ACT_CON:
+            conn_list = self.connections_list
+            for i in range(0, 8):
+                try:
+                    if conn_list[i]:
+                        self.port.write(('wifi_act_con.b{}.txt="{}"{}'.format(i, conn_list[i], self.eof)).encode('iso8859_1'))
+                except:
+                    pass
+
+        if self.current_page == PAGE_DEL_CON:
+            conn_list = self.connections_list
+            for i in range(0, 8):
+                try:
+                    if conn_list[i]:
+                        self.port.write(('wifi_del_con.b{}.txt="{}"{}'.format(i, conn_list[i], self.eof)).encode('iso8859_1'))
+                except:
+                    pass
+
+    def nextion_write_info(self):
+        self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+
+        # Info
+        if self.current_page == PAGE_CONNECT_ME:
+            self.port.write(('connect_me.t0.txt="http://{}:7777"{}'.format(self.connection_detail_ip, self.eof)).encode(
+                    'iso8859_1'))
+            self.port.write(('connect_me.t1.txt="http://{}:11311"{}'.format(self.connection_detail_ip, self.eof)).encode(
+                    'iso8859_1'))
+
+
+    def nextion_write(self):
+        self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+        self.read_serial()
+
+        dt_object = datetime.fromtimestamp(int(rospy.get_time()))
+
+        if self.current_page == int(PAGE_INTRO):
+            self.port.write(("dp={}{}".format(PAGE_MAIN, self.eof)).encode('iso8859_1'))
+
+        # Write time to variable as a keep alive
+        self.port.write(('main.va0.txt="{}"{}'.format(dt_object.strftime("%H:%M:%S"), self.eof)).encode('iso8859_1'))
+
+        self.nextion_write_wifi()
+        self.nextion_write_info()
+        if (self.current_page == PAGE_MAIN or self.current_page == PAGE_POWER_MODULE):
+            self.nextion_write_icons()
+        if self.current_page == PAGE_POWER_MODULE:
+            self.nextion_power_module()
+
+        ## STATUS TEXT
+        self.port.write(('main.t1.txt="{}"{}'.format(dt_object.strftime("%H:%M:%S"), self.eof)).encode('iso8859_1'))  # Status text text
+
+
+if __name__ == '__main__':
+    try:
+        rospy.init_node('nextion_lcd')
+        rospy.loginfo("<{}> Initialising nextion_lcd_node...".format(rospy.get_caller_id()))
+        node = Node()
+        r = rospy.Rate(2)  # Hz
+
+        def signal_handler(signum, frame):
+            node.nextion_write_status_text("Disconnected")
+            rospy.signal_shutdown("end")
+            sys.exit(0)
+        signal.signal(signal.SIGINT, signal_handler)
+
+        while not rospy.is_shutdown():
+            # node.read_serial()
+            node.nextion_write()
+            r.sleep()
+
+    except rospy.ROSInterruptException:
+        rospy.logerr("<{}> nextion_lcd_node error.".format(rospy.get_caller_id()))

@@ -1,0 +1,21 @@
+<launch>
+
+    <arg name="arg_ns" default="nextion"/>
+    <group ns="$(arg arg_ns)">
+
+        <!--    #### Node nextion_lcd  #####-->
+        <node name="nextion_lcd" pkg="vitulus" type="nextion_lcd" respawn="true" respawn_delay="1" output="screen">
+<!--            <param name="prm_name" value="prm_value"/>-->
+<!--            <remap from="/topic" to="/another_topic" />-->
+        </node>
+
+    </group>
+
+    <!--##### Show in Rviz #####-->
+    <!--    <node name="rviz"-->
+    <!--              pkg="rviz"-->
+    <!--              type="rviz"-->
+    <!--              args="-d $(find vitulus)/rviz/vitulus.rviz"-->
+    <!--              required="false" />-->
+
+</launch>

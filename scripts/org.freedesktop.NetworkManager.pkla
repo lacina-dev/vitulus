@@ -1,0 +1,7 @@
+[nm-applet]
+Identity=unix-user:vitulus
+Action=org.freedesktop.NetworkManager.*
+ResultAny=yes
+ResultInactive=no
+ResultActive=yes
+
