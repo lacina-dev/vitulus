@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 from std_msgs.msg import Bool, String, Int16
 from vitulus_msgs.msg import NmConn, NmSsid, NmSsidList, NmConnDetail, NmConnAdd
-from vitulus_msgs.msg import vitulus_ups, Power_status
+from vitulus_msgs.msg import vitulus_ups, Power_status, Mower
 from vitulus_msgs.msg import Device_icon_status
 import sys
 import signal
@@ -29,6 +29,7 @@ PAGE_ADD_CON = 6
 PAGE_CONN = 7
 PAGE_SCAN = 8
 PAGE_DEL_CON = 9
+PAGE_MOWER = 17
 
 
 class Node:
@@ -42,6 +43,7 @@ class Node:
         self.connection_detail_ip = ''
         self.msg_pm_ups = vitulus_ups()
         self.msg_pm_power_status = Power_status()
+        self.msg_mower_status = Mower()
 
 
         self.msg_icon_status = Device_icon_status()
@@ -68,6 +70,13 @@ class Node:
         self.pub_disconnect_wifi = rospy.Publisher('/nmcli/disconnect_wifi', Bool, queue_size=10)
         self.pub_pm_play_melody = rospy.Publisher('/pm/play_melody', Int16, queue_size=10)
         self.pub_base_motor_power = rospy.Publisher('/base/motor_power', Bool, queue_size=10)
+        self.pub_mower_set_calibrate = rospy.Publisher('/mower/set_calibrate', Bool, queue_size=10)
+        self.pub_mower_set_home = rospy.Publisher('/mower/set_home', Bool, queue_size=10)
+        self.pub_mower_set_motor_on = rospy.Publisher('/mower/set_motor_on', Bool, queue_size=10)
+        self.pub_mower_set_motor_dir = rospy.Publisher('/mower/set_motor_dir', String, queue_size=10)
+        self.pub_mower_set_power = rospy.Publisher('/mower/set_power', Bool, queue_size=10)
+        self.pub_mower_set_cut_height = rospy.Publisher('/mower/set_cut_height', Int16, queue_size=10)
+        self.pub_mower_set_motor_rpm = rospy.Publisher('/mower/set_motor_rpm', Int16, queue_size=10)
 
         self.sub_nmcli_conn_list = rospy.Subscriber("/nmcli/conn_list", NmConn, self.callback_nmcli_conn_list)
         self.sub_nmcli_conn_detail = rospy.Subscriber("/nmcli/conn_detail", NmConnDetail, self.callback_nmcli_conn_detail)
@@ -76,6 +85,7 @@ class Node:
         self.sub_pm_ups = rospy.Subscriber("/pm/ups", vitulus_ups, self.callback_pm_ups)
         self.sub_nextion_status_text = rospy.Subscriber("status_text", String, self.callback_nextion_status_text)
         self.sub_icon_status = rospy.Subscriber("/device_state_pub/icon_status", Device_icon_status, self.callback_icon_status)
+        self.sub_mower_status = rospy.Subscriber("/mower/status", Mower, self.callback_mower_status)
 
         self.eof = "\xff\xff\xff"
         self.no_brightnes = "dim=0"
@@ -85,6 +95,40 @@ class Node:
         self.init_nextion()
         self.timer_read_serial = rospy.Timer(rospy.Duration(1.0 / 5), self.read_serial)
 
+    def publish_mower_set_motor_rpm(self, rpm):
+        msg = Int16()
+        msg.data = rpm
+        self.pub_mower_set_motor_rpm.publish(msg)
+
+    def publish_mower_set_cut_height(self, height):
+        msg = Int16()
+        msg.data = height
+        self.pub_mower_set_cut_height.publish(msg)
+
+    def publish_mower_set_calibrate(self, status):
+        msg = Bool()
+        msg.data = status
+        self.pub_mower_set_calibrate.publish(msg)
+
+    def publish_mower_set_home(self, status):
+        msg = Bool()
+        msg.data = status
+        self.pub_mower_set_home.publish(msg)
+
+    def publish_mower_set_motor_on(self, status):
+        msg = Bool()
+        msg.data = status
+        self.pub_mower_set_motor_on.publish(msg)
+
+    def publish_mower_set_motor_dir(self, status):
+        msg = String()
+        msg.data = status
+        self.pub_mower_set_motor_dir.publish(msg)
+
+    def publish_mower_set_power(self, status):
+        msg = Bool()
+        msg.data = status
+        self.pub_mower_set_power.publish(msg)
 
     def publish_base_motor_power(self, status):
         msg = Bool()
@@ -165,9 +209,13 @@ class Node:
     def callback_nextion_status_text(self, msg):
         self.nextion_write_status_text = msg.data
 
-    # callback icon status
+    # callback device status
     def callback_icon_status(self, msg):
         self.msg_icon_status = msg
+
+    # callback mower status
+    def callback_mower_status(self, msg):
+        self.msg_mower_status = msg
 
     # write to status text box on main page
     def nextion_write_status_text(self, text):
@@ -278,6 +326,63 @@ class Node:
             self.publish_base_motor_power(True)
         if message[0] == "MOTOFF":
             self.publish_base_motor_power(False)
+
+        # Mower on/off btns
+        if message[0] == "MOWER":
+            if message[1] == "ON":
+                self.publish_mower_set_power(True)
+            if message[1] == "OFF":
+                self.publish_mower_set_power(False)
+
+        # Mower start/stop btns
+        if message[0] == "RUN":
+            if message[1] == "START":
+                self.publish_mower_set_motor_on(True)
+            if message[1] == "STOP":
+                self.publish_mower_set_motor_on(False)
+
+        # Mower left/right btns
+        if message[0] == "DIR":
+            if message[1] == "LEFT":
+                self.publish_mower_set_motor_dir('LEFT')
+            if message[1] == "RIGHT":
+                self.publish_mower_set_motor_dir('RIGHT')
+
+        # Mower calibration btn
+        if message[0] == "CALI":
+            if message[1] == "ON":
+                self.publish_mower_set_calibrate(True)
+
+        # Mower home btn
+        if message[0] == "HOME":
+            if message[1] == "ON":
+                self.publish_mower_set_home(True)
+
+        # Mower plus/minus rpm btns
+        if message[0] == "RPM":
+            if message[1] == "PLUS":
+                rpm = self.msg_mower_status.setpoint_rpm + 400
+                if rpm <= 4000:
+                    self.publish_mower_set_motor_rpm(rpm)
+            if message[1] == "MINUS":
+                rpm = self.msg_mower_status.setpoint_rpm - 400
+                if rpm >= 400:
+                    self.publish_mower_set_motor_rpm(rpm)
+
+        # Mower plus/minus cut height btns
+        if message[0] == "H":
+            if message[1] == "PLUS":
+                height = self.msg_mower_status.current_height + 10
+                if height <= self.msg_mower_status.max_height:
+                    self.publish_mower_set_cut_height(height)
+            if message[1] == "MINUS":
+                height = self.msg_mower_status.current_height - 10
+                if height >= 10:
+                    self.publish_mower_set_cut_height(height)
+
+
+
+
 
     def nextion_write_icons(self):
 
@@ -702,6 +807,20 @@ class Node:
                     'iso8859_1'))
 
 
+    def nextion_write_mower(self):
+        self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+
+        # Mower status msg
+        if self.current_page == PAGE_MOWER:
+            self.port.write(('mower.status.txt="{}"{}'.format(self.msg_mower_status.status, self.eof)).encode('iso8859_1'))
+            self.port.write(('mower.dir.txt="{}"{}'.format(self.msg_mower_status.moto_dir, self.eof)).encode('iso8859_1'))
+            self.port.write(('mower.rpm_setp.txt="({})"{}'.format(self.msg_mower_status.setpoint_rpm, self.eof)).encode('iso8859_1'))
+            self.port.write(('mower.rpm.txt="{}"{}'.format(self.msg_mower_status.moto_rpm, self.eof)).encode('iso8859_1'))
+            self.port.write(('mower.h_setp.txt="max. {}"{}'.format(self.msg_mower_status.max_height, self.eof)).encode('iso8859_1'))
+            self.port.write(('mower.h.txt="{} mm"{}'.format(self.msg_mower_status.current_height, self.eof)).encode('iso8859_1'))
+
+
+
     def nextion_write(self):
         self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
         self.read_serial()
@@ -716,6 +835,7 @@ class Node:
 
         self.nextion_write_wifi()
         self.nextion_write_info()
+        self.nextion_write_mower()
         if (self.current_page == PAGE_MAIN or self.current_page == PAGE_POWER_MODULE):
             self.nextion_write_icons()
         if self.current_page == PAGE_POWER_MODULE:
