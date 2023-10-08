@@ -7,10 +7,10 @@
         <remap from="~output" to="/voxel_grid/output_y"/>
         <rosparam>
             filter_field_name: y
-            filter_limit_min: -0.70
-            filter_limit_max: 2
+            filter_limit_min: -0.25
+            filter_limit_max: 2.5
             filter_limit_negative: False
-            leaf_size: 0.02
+            leaf_size: 0.033
         </rosparam>
     </node>
     <node pkg="nodelet" type="nodelet" name="voxel_grid_z" args="load pcl/VoxelGrid pcl_manager" respawn="true" respawn_delay="1" output="screen">
@@ -18,10 +18,10 @@
         <remap from="~output" to="/voxel_grid/output_z"/>
         <rosparam>
             filter_field_name: z
-            filter_limit_min: 0.68
-            filter_limit_max: 3
+            filter_limit_min: 0.25 # 0.68
+            filter_limit_max: 3.2
             filter_limit_negative: False
-            leaf_size: 0.02
+            leaf_size: 0.033
         </rosparam>
     </node>
     <node pkg="nodelet" type="nodelet" name="voxel_grid_z_light" args="load pcl/VoxelGrid pcl_manager" respawn="true" respawn_delay="1" output="screen">
