@@ -31,10 +31,10 @@
       <arg name="usb_port_id"         value="$(arg usb_port_id)"/>
       <arg name="depth_width"       value="640"/> <!--  1280 848 640 640 480 424 -->
       <arg name="depth_height"      value="480"/> <!--  720 480 480 360 270 240 -->
-      <arg name="depth_fps"         value="30"/>
+      <arg name="depth_fps"         value="15"/>
       <arg name="color_width"       value="640"/>
       <arg name="color_height"      value="480"/>
-      <arg name="color_fps"         value="30"/>
+      <arg name="color_fps"         value="15"/>
       <arg name="enable_depth"      value="true"/>
       <arg name="enable_color"      value="true"/>
       <arg name="enable_infra1"     value="false"/>
@@ -49,7 +49,7 @@
       <arg name="initial_reset"     value="true"/>
 <!--      <arg name="allow_no_texture_points"     value="true"/>-->
       <arg name="filters"           value="decimation,temporal,hole_filling,disparity,spatial,"/>
-      <arg name="clip_distance"     value="10"/>
+      <arg name="clip_distance"     value="5"/>
 <!--      <arg name="clip_distance"     value="3.1"/>  -->
       <arg name="align_depth"       value="true"/>
       <arg name="respawn"       value="true"/>
