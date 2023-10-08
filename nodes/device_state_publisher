@@ -77,11 +77,11 @@ class Node:
         self.msg_gnss_navstatus = NavSTATUS()
 
         self.GNSS_NAV_FIX_TIMEOUT = 3
-        self.sub_gnss_nav_fix = rospy.Subscriber("/gnss_lite/fix", NavSatFix, self.callback_gnss_nav_fix)
+        self.sub_gnss_nav_fix = rospy.Subscriber("/gnss_heading/fix", NavSatFix, self.callback_gnss_nav_fix)
         self.msg_gnss_nav_fix = NavSatFix()
         self.msg_gnss_nav_fix.header.stamp = rospy.Time.now()
         self.is_msg_gnss_nav_fix_valid = False
-        self.sub_gnss_nav_navstatus = rospy.Subscriber("/gnss_lite/navstatus", NavSTATUS, self.callback_gnss_nav_navstatus)
+        self.sub_gnss_nav_navstatus = rospy.Subscriber("/gnss_heading/navstatus", NavSTATUS, self.callback_gnss_nav_navstatus)
         self.msg_gnss_nav_navstatus = NavSTATUS()
 
         self.MOWER_STATUS_TIMEOUT = 4
