@@ -5,7 +5,7 @@ from datetime import datetime
 from std_msgs.msg import Bool, String, Int16
 from vitulus_msgs.msg import NmConn, NmSsid, NmSsidList, NmConnDetail, NmConnAdd
 from vitulus_msgs.msg import vitulus_ups, Power_status, Mower
-from vitulus_msgs.msg import Device_icon_status
+from vitulus_msgs.msg import Device_icon_status, PlannerProgramList, PlannerProgram, StringList
 import sys
 import signal
 import serial
@@ -30,6 +30,9 @@ PAGE_CONN = 7
 PAGE_SCAN = 8
 PAGE_DEL_CON = 9
 PAGE_MOWER = 17
+PAGE_MOWER_PROGRAMS = 18
+PAGE_MAPS = 19
+PAGE_NAVIGATION = 20
 
 
 class Node:
@@ -44,6 +47,11 @@ class Node:
         self.msg_pm_ups = vitulus_ups()
         self.msg_pm_power_status = Power_status()
         self.msg_mower_status = Mower()
+        self.msg_mower_programs = PlannerProgramList()
+        self.msg_map_list = StringList()
+        self.msg_smach_active_program = String()
+        self.msg_navi_active_map = String()
+        self.msg_navi_map_status = String()
 
 
         self.msg_icon_status = Device_icon_status()
@@ -77,6 +85,9 @@ class Node:
         self.pub_mower_set_power = rospy.Publisher('/mower/set_power', Bool, queue_size=10)
         self.pub_mower_set_cut_height = rospy.Publisher('/mower/set_cut_height', Int16, queue_size=10)
         self.pub_mower_set_motor_rpm = rospy.Publisher('/mower/set_motor_rpm', Int16, queue_size=10)
+        self.pub_planner_reload = rospy.Publisher('/web_plan/reload', Bool, queue_size=10, latch=True)
+        self.pub_map_load = rospy.Publisher('/navi_manager/load_map', String, queue_size=10, latch=False)
+        self.pub_mower_program_selected = rospy.Publisher('/web_plan/program_select', String, queue_size=10, latch=False)
 
         self.sub_nmcli_conn_list = rospy.Subscriber("/nmcli/conn_list", NmConn, self.callback_nmcli_conn_list)
         self.sub_nmcli_conn_detail = rospy.Subscriber("/nmcli/conn_detail", NmConnDetail, self.callback_nmcli_conn_detail)
@@ -86,11 +97,18 @@ class Node:
         self.sub_nextion_status_text = rospy.Subscriber("status_text", String, self.callback_nextion_status_text)
         self.sub_icon_status = rospy.Subscriber("/device_state_pub/icon_status", Device_icon_status, self.callback_icon_status)
         self.sub_mower_status = rospy.Subscriber("/mower/status", Mower, self.callback_mower_status)
+        self.sub_mower_programs = rospy.Subscriber("/web_plan/program_list", PlannerProgramList, self.callback_mower_programs)
+        self.sub_map_list = rospy.Subscriber("/navi_manager/map_str_list", StringList, self.callback_map_list)
+        self.sub_smach_active_program = rospy.Subscriber("/mower_smach/active_program", String, self.callback_smach_active_program)
+        self.sub_navi_active_map = rospy.Subscriber("/navi_manager/active_map", String, self.callback_navi_active_map)
+        self.sub_navi_map_status = rospy.Subscriber("/navi_manager/map_status", String, self.callback_navi_map_status)
+        self.sub_nextion_log_info = rospy.Subscriber("log_info", String, self.callback_nextion_log_info)
 
         self.eof = "\xff\xff\xff"
         self.no_brightnes = "dim=0"
         self.full_brightnes = "dim=100"
         self.current_page = 0
+        self.last_page = 0
 
         self.init_nextion()
         self.timer_read_serial = rospy.Timer(rospy.Duration(1.0 / 5), self.read_serial)
@@ -205,9 +223,13 @@ class Node:
     def callback_pm_ups(self, msg):
         self.msg_pm_ups = msg
 
+    # callback text to write to log info text box on main page - second row
+    def callback_nextion_log_info(self, msg):
+        self.nextion_write_log_info_text(msg.data)
+
     # callback text to write to status text box on main page
     def callback_nextion_status_text(self, msg):
-        self.nextion_write_status_text = msg.data
+        self.nextion_write_status_text(msg.data)
 
     # callback device status
     def callback_icon_status(self, msg):
@@ -217,9 +239,41 @@ class Node:
     def callback_mower_status(self, msg):
         self.msg_mower_status = msg
 
+    # callback mower programs
+    def callback_mower_programs(self, msg):
+        self.msg_mower_programs = msg
+        prog_list = self.msg_mower_programs.program_list
+        for i in range(0, 8):
+            try:
+                if prog_list[i]:
+                    self.port.write(
+                        ('program.b{}.txt="{}"{}'.format(i, prog_list[i].name, self.eof)).encode('iso8859_1'))
+            except:
+                pass
+
+    # callback map list
+    def callback_map_list(self, msg):
+        self.msg_map_list = msg
+
+    # callback active program
+    def callback_smach_active_program(self, msg):
+        self.msg_smach_active_program = msg
+
+    # callback active map
+    def callback_navi_active_map(self, msg):
+        self.msg_navi_active_map = msg
+
+    # callback map status
+    def callback_navi_map_status(self, msg):
+        self.msg_navi_map_status = msg
+
     # write to status text box on main page
     def nextion_write_status_text(self, text):
-        self.port.write(('page0.t1.txt="{}"{}'.format(text, self.eof)).encode('iso8859_1'))  # Status text
+        self.port.write(('main.t1.txt="{}"{}'.format(text, self.eof)).encode('iso8859_1'))  # Status text
+
+    # write to log info text box on main page
+    def nextion_write_log_info_text(self, text):
+        self.port.write(('main.t0.txt="{}"{}'.format(text, self.eof)).encode('iso8859_1'))  # Log info text
 
     def init_nextion(self):
         rospy.loginfo("<{}> Connecting to nextion serial 9600 baud.".format(rospy.get_caller_id()))
@@ -251,6 +305,7 @@ class Node:
                     message_type = chr(message[0])
                     # print(message_type)
                     if message_type == 'q':  # If is current page message
+                        self.last_page = self.current_page
                         # print(message)
                         try:
                             data1 = struct.unpack("BBBBB", message)
@@ -288,10 +343,10 @@ class Node:
         # Add new nm connection
         if message[0] == "ADDCON":
             if message[1] in self.connections_list:
-                self.port.write(('page7.t5.txt="Connection exist!"{}'.format(self.eof)).encode('iso8859_1'))
+                self.port.write(('wifi_add_con.t5.txt="Connection exist!"{}'.format(self.eof)).encode('iso8859_1'))
             else:
                 self.publish_conn_add(message[1], message[2])
-                self.port.write(('page7.t5.txt="Successfully added."{}'.format(self.eof)).encode('iso8859_1'))
+                self.port.write(('wifi_add_con.t5.txt="Successfully added."{}'.format(self.eof)).encode('iso8859_1'))
         # Remove nm connection
         if message[0] == "REMCON":
             self.publish_conn_del(message[1])
@@ -380,9 +435,17 @@ class Node:
                 if height >= 10:
                     self.publish_mower_set_cut_height(height)
 
+        # Select map btns
+        if message[0] == "ACTMAP":
+            msg = String()
+            msg.data = message[1]
+            self.pub_map_load.publish(msg)
 
-
-
+        # Select program btns
+        if message[0] == "ACTPROG":
+            msg = String()
+            msg.data = message[1]
+            self.pub_mower_program_selected.publish(msg)
 
     def nextion_write_icons(self):
 
@@ -653,7 +716,7 @@ class Node:
 
 
     def nextion_power_module(self):
-        self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+        # self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
 
         ## POWER MODULE
         BACKGROUND_GREY = 89
@@ -755,7 +818,7 @@ class Node:
             self.port.write(('power_module.converter.picc={}{}'.format(BACKGROUND_GREY, self.eof)).encode('iso8859_1'))
 
     def nextion_write_wifi(self):
-        self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+        # self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
 
         # WiFi
         if self.current_page == PAGE_WIFI:
@@ -776,7 +839,7 @@ class Node:
             self.port.write(('wifi_scan.scan.txt="{}"{}'.format(self.ssid_list_str, self.eof)).encode(
                 'iso8859_1'))
 
-        self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+        # self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
 
         if self.current_page == PAGE_ACT_CON:
             conn_list = self.connections_list
@@ -797,7 +860,7 @@ class Node:
                     pass
 
     def nextion_write_info(self):
-        self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+        # self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
 
         # Info
         if self.current_page == PAGE_CONNECT_ME:
@@ -808,7 +871,7 @@ class Node:
 
 
     def nextion_write_mower(self):
-        self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+        # self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
 
         # Mower status msg
         if self.current_page == PAGE_MOWER:
@@ -819,6 +882,42 @@ class Node:
             self.port.write(('mower.h_setp.txt="max. {}"{}'.format(self.msg_mower_status.max_height, self.eof)).encode('iso8859_1'))
             self.port.write(('mower.h.txt="{} mm"{}'.format(self.msg_mower_status.current_height, self.eof)).encode('iso8859_1'))
 
+    def nextion_write_mower_programs(self):
+        # self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+
+        # Mower programs msg
+        if self.current_page == PAGE_MOWER_PROGRAMS:
+            if self.last_page != self.current_page:
+                self.pub_planner_reload.publish(Bool(True))
+                # continue on /reload_planner topic callback
+
+
+    def nextion_write_map_list(self):
+        # self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+
+        # Mower status msg
+        if self.current_page == PAGE_MAPS:
+            map_list = self.msg_map_list.string_list
+            for i in range(0, 8):
+                try:
+                    if map_list[i]:
+                        map_name = map_list[i].split(" (")[0]
+                        self.port.write(
+                            ('maps.b{}.txt="{}"{}'.format(i, map_name, self.eof)).encode('iso8859_1'))
+                except:
+                    pass
+
+    def nextion_write_current_navi_info(self):
+        # self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
+
+        # Mower status msg
+        if self.current_page == PAGE_NAVIGATION:
+            active_map = self.msg_navi_active_map.data
+            map_status = self.msg_navi_map_status.data
+            active_program = self.msg_smach_active_program.data
+            self.port.write(('navigation.t2.txt="{}"{}'.format(active_map, self.eof)).encode('iso8859_1'))
+            self.port.write(('navigation.t5.txt="{}"{}'.format(map_status, self.eof)).encode('iso8859_1'))
+            self.port.write(('navigation.t3.txt="{}"{}'.format(active_program, self.eof)).encode('iso8859_1'))
 
 
     def nextion_write(self):
@@ -836,6 +935,9 @@ class Node:
         self.nextion_write_wifi()
         self.nextion_write_info()
         self.nextion_write_mower()
+        self.nextion_write_mower_programs()
+        self.nextion_write_map_list()
+        self.nextion_write_current_navi_info()
         if (self.current_page == PAGE_MAIN or self.current_page == PAGE_POWER_MODULE):
             self.nextion_write_icons()
         if self.current_page == PAGE_POWER_MODULE:

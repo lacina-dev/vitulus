@@ -18,6 +18,9 @@
     <include file="$(find vitulus_gnss)/launch/vitulus_ardusimple_gnss.launch"/>
     <include file="$(find vitulus_webui)/launch/vitulus_webui.launch"/>
     <include file="$(find vitulus_mower)/launch/mower.launch"/>
+    <include file="$(find vitulus_ds4)/launch/ds4.launch"/>
+    <include file="$(find vitulus_navi)/launch/navi_man.launch"/>
+    <include file="$(find vitulus_planner)/launch/planner.launch"/>
 
 <!--    <include file="$(find vitulus_planner)/launch/map_server.launch"/>-->
 

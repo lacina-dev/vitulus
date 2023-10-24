@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import rospy
 import time
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, String, Int16
 from sensor_msgs.msg import LaserScan, NavSatFix
 from ublox_msgs.msg import NavSTATUS
 from vitulus_msgs.msg import Power_status
@@ -107,6 +107,12 @@ class Node:
         self.msg_icon_status.gnss_nav = "DISABLED"
         self.msg_icon_status.gnss = "DISABLED"
         self.msg_icon_status.wifi = "DISABLED"
+
+        self.gnss_last = "DISABLED"
+
+        self.pub_log_info = rospy.Publisher('/nextion/log_info', String, queue_size=10)
+        self.pub_pm_play_melody = rospy.Publisher('/pm/play_melody', Int16, queue_size=10)
+
 
     def check_messages_timeout(self):
         # pm_power_status
@@ -480,6 +486,27 @@ class Node:
         self.msg_icon_status.header.stamp = rospy.Time.now()
         self.pub_icon_status.publish(self.msg_icon_status)
 
+    def publish_info_log(self, text):
+        self.pub_log_info.publish(String(text))
+
+    def check_rtk_status(self):
+        # ####### Check changes of GNSS_FIX and publish to log_info
+        if self.gnss_last != self.msg_icon_status.gnss:
+            if self.msg_icon_status.gnss == "3DFIX":
+                self.publish_info_log("3DFIX acquired")
+                self.publish_pm_play_melody(1)  # 5:short_beep, 1:beep, 2:double beep,
+            elif self.msg_icon_status.gnss == "RTK":
+                self.publish_info_log("RTK FIX acquired")
+                self.publish_pm_play_melody(2)  # 5:short_beep, 1:beep, 2:double beep,
+            else:
+                self.publish_info_log("GNSS FIX lost!")
+        self.gnss_last = self.msg_icon_status.gnss
+
+    def publish_pm_play_melody(self, melody_id):
+        msg = Int16()
+        msg.data = int(melody_id) # 5:short_beep, 1:beep, 2:double beep,
+        self.pub_pm_play_melody.publish(msg)
+
     def callback_pm_power_status(self, msg):
         self.msg_pm_power_status = msg
 
@@ -562,6 +589,7 @@ if __name__ == '__main__':
             node.set_ico_mower_status()
 
             node.publish_icon_status()
+            node.check_rtk_status()
             r.sleep()
 
     except rospy.ROSInterruptException:
