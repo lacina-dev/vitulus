@@ -13,7 +13,7 @@ import struct
 from std_srvs.srv import EmptyRequest, Empty
 
 PAGE_INTRO = 0
-PAGE_QR_ANDROID = 10
+PAGE_QR_WEBSITE = 10
 PAGE_QR_WEBUI = 11
 PAGE_CONNECT_ME = 12
 PAGE_QR_DOCS = 13
@@ -21,7 +21,8 @@ PAGE_ABOUT = 14
 PAGE_MAIN = 1
 PAGE_POWER_MODULE = 16
 PAGE_INFO_ANDROID = 10
-PAGE_INFO_WEUI = 11
+PAGE_INFO_WEBUI = 11
+PAGE_INFO = 2
 
 PAGE_WIFI = 4
 PAGE_ACT_CON = 5
@@ -353,11 +354,11 @@ class Node:
             self.port.write(('page10.t5.txt="Connection removed."{}'.format(self.eof)).encode('iso8859_1'))
         if message[0] == "ACTCON":
             self.publish_conn_activate(message[1])
-        if message[0] == "APPQR":
-            self.port.write(('qr_android.qr0.txt="http://{}:11311"{}'.format(self.connection_detail_ip, self.eof)).encode('iso8859_1'))
-            self.port.write(('vis qr0,1{}'.format(self.eof)).encode('iso8859_1'))
+        if message[0] == "CONNME":
+            # self.publish_pm_play_melody(2)
+            self.port.write(('conn_me.t2.txt="http://{}:7777"{}'.format(self.connection_detail_ip, self.eof)).encode('iso8859_1'))
         if message[0] == "WEBQR":
-            self.port.write(('qr_webui.qr0.txt="http://{}:7777"{}'.format(self.connection_detail_ip, self.eof)).encode('iso8859_1'))
+            self.port.write(('qr_webui.qr0.txt="http://{}:7777/mob/map_view"{}'.format(self.connection_detail_ip, self.eof)).encode('iso8859_1'))
             self.port.write(('vis qr0,1{}'.format(self.eof)).encode('iso8859_1'))
         if message[0] == "LIDON":
             rospy.wait_for_service('/start_motor')
@@ -859,16 +860,6 @@ class Node:
                 except:
                     pass
 
-    def nextion_write_info(self):
-        # self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
-
-        # Info
-        if self.current_page == PAGE_CONNECT_ME:
-            self.port.write(('connect_me.t0.txt="http://{}:7777"{}'.format(self.connection_detail_ip, self.eof)).encode(
-                    'iso8859_1'))
-            self.port.write(('connect_me.t1.txt="http://{}:11311"{}'.format(self.connection_detail_ip, self.eof)).encode(
-                    'iso8859_1'))
-
 
     def nextion_write_mower(self):
         # self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
@@ -933,7 +924,6 @@ class Node:
         self.port.write(('main.va0.txt="{}"{}'.format(dt_object.strftime("%H:%M:%S"), self.eof)).encode('iso8859_1'))
 
         self.nextion_write_wifi()
-        self.nextion_write_info()
         self.nextion_write_mower()
         self.nextion_write_mower_programs()
         self.nextion_write_map_list()
