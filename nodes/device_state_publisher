@@ -494,10 +494,10 @@ class Node:
         if self.gnss_last != self.msg_icon_status.gnss:
             if self.msg_icon_status.gnss == "3DFIX":
                 self.publish_info_log("3DFIX acquired")
-                self.publish_pm_play_melody(1)  # 5:short_beep, 1:beep, 2:double beep,
+                # self.publish_pm_play_melody(1)  # 5:short_beep, 1:beep, 2:double beep,
             elif self.msg_icon_status.gnss == "RTK":
                 self.publish_info_log("RTK FIX acquired")
-                self.publish_pm_play_melody(2)  # 5:short_beep, 1:beep, 2:double beep,
+                # self.publish_pm_play_melody(2)  # 5:short_beep, 1:beep, 2:double beep,
             else:
                 self.publish_info_log("GNSS FIX lost!")
         self.gnss_last = self.msg_icon_status.gnss
