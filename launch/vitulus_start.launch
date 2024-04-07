@@ -8,8 +8,8 @@
     <include file="$(find vitulus)/launch/nextion_lcd.launch" />
     <include file="$(find vitulus_nmcli)/launch/nmcli.launch" />
     <include file="$(find vitulus_description)/launch/vitulus4wd.launch" />
-<!--    <include file="$(find vitulus_imu)/launch/vitulus_imu.launch" />-->
-    <include file="$(find vitulus_imu)/launch/vitulus_imu_v2.launch" />
+    <include file="$(find vitulus_imu)/launch/vitulus_imu.launch" />
+<!--    <include file="$(find vitulus_imu)/launch/vitulus_imu_v2.launch" />-->
     <include file="$(find vitulus)/launch/rplidar.launch" />
     <include file="$(find vitulus)/launch/d435.launch" />
     <include file="$(find vitulus_base)/launch/base_control.launch" />
@@ -21,6 +21,7 @@
     <include file="$(find vitulus_ds4)/launch/ds4.launch"/>
     <include file="$(find vitulus_navi)/launch/navi_man.launch"/>
     <include file="$(find vitulus_planner)/launch/planner.launch"/>
+    <include file="$(find system_monitor)/launch/system_monitor.launch"/>
     <include file="$(find vitulus_webui)/launch/vitulus_webui.launch"/>
 
 
