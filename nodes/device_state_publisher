@@ -458,13 +458,13 @@ class Node:
             self.msg_icon_status.gnss_nav = "DISABLED"
 
     def set_ico_mower_status(self):
-        #  RUN, WAIT, ERROR, CHANGE_HEIGHT, HOME, CALIBRATING, INIT, OFF
+        #  RUN, WAIT, ERR, CHANGE_HEIGHT, HOME, CALIBRATING, INIT, BLOCKED, TEMP, OFF
 
         # If the  messages are comming, so the mower is alive
         if self.is_msg_mower_status_valid:
             if self.msg_mower_status.status == "RUN":
                 self.msg_icon_status.mower = "ON"
-            if self.msg_mower_status.status == "WAIT":
+            if self.msg_mower_status.status == "READY":
                 self.msg_icon_status.mower = "ON"
             if self.msg_mower_status.status == "CHANGE_HEIGHT":
                 self.msg_icon_status.mower = "BUSY"
@@ -474,13 +474,17 @@ class Node:
                 self.msg_icon_status.mower = "BUSY"
             if self.msg_mower_status.status == "INIT":
                 self.msg_icon_status.mower = "BUSY"
-            if self.msg_mower_status.status == "ERROR":
+            if self.msg_mower_status.status == "ERR":
+                self.msg_icon_status.mower = "ERROR"
+            if self.msg_mower_status.status == "BLOCKED":
+                self.msg_icon_status.mower = "ERROR"
+            if self.msg_mower_status.status == "TEMP":
                 self.msg_icon_status.mower = "ERROR"
             if self.msg_mower_status.status == "OFF":
                 self.msg_icon_status.mower = "DISABLED"
         # If the  messages not comming, so the mower is not connected
         else:
-            self.msg_icon_status.mower = "DISABLED"
+            self.msg_icon_status.mower = "INVALID"
 
     def publish_icon_status(self):
         self.msg_icon_status.header.stamp = rospy.Time.now()
