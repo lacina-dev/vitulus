@@ -14,6 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   std_msgs
+  sensor_msgs
   vitulus_msgs
   message_generation
   roslaunch
@@ -45,7 +46,7 @@ catkin_python_setup()
 ################################################################################
 catkin_package(
   # INCLUDE_DIRS include
-  CATKIN_DEPENDS roscpp rospy vitulus_msgs std_msgs message_runtime
+  CATKIN_DEPENDS roscpp rospy vitulus_msgs sensor_msgs std_msgs message_runtime
 )
 
 ################################################################################
@@ -60,18 +61,18 @@ include_directories(
 #   ${catkin_INCLUDE_DIRS}
 # )
 
-# add_executable(${PROJECT_NAME}_node
-#   src/vitulus_template.cpp
-# )
+add_executable(${PROJECT_NAME}_laser_override_node
+  src/laserscan_override.cpp
+)
 
-# target_link_libraries(${PROJECT_NAME}_node
-#   ${catkin_LIBRARIES}
-# )
+target_link_libraries(${PROJECT_NAME}_laser_override_node
+  ${catkin_LIBRARIES}
+)
 
-# add_dependencies(${PROJECT_NAME}_node
-#   ${${PROJECT_NAME}_EXPORTED_TARGETS}
-#   ${catkin_EXPORTED_TARGETS}
-# )
+add_dependencies(${PROJECT_NAME}_laser_override_node
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
+  ${catkin_EXPORTED_TARGETS}
+)
 
 
 ################################################################################

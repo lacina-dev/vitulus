@@ -13,6 +13,7 @@
   <depend>rospy</depend>
   <depend>roscpp</depend>
   <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
   <depend>vitulus_msgs</depend>
   <exec_depend>rosserial_python</exec_depend>
   <exec_depend>message_runtime</exec_depend>

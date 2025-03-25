@@ -1,12 +1,14 @@
 ## ! DO NOT MANUALLY INVOKE THIS setup.py, USE CATKIN INSTEAD
 
-from distutils.core import setup
+import sys
+from setuptools import setup
 from catkin_pkg.python_setup import generate_distutils_setup
 
 # fetch values from package.xml
 setup_args = generate_distutils_setup(
     packages=['main', 'nextion_lcd', 'device_state_publisher'],
-    package_dir={'': 'src'}
+    package_dir={'': 'src'},
 )
+
 
 setup(**setup_args)
