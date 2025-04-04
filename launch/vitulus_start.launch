@@ -3,6 +3,19 @@
 <!--    <include file="$(find vitulus)/launch/main.launch">-->
 <!--    <arg name="arg_name" value="$(arg arg_val)"/>-->
 <!--    </include>-->
+
+
+       <!-- Record all topics for 120 seconds -->
+    <arg name="record_all" default="true" doc="Record all topics for 120 seconds."/>
+    <node 
+        pkg="rosbag" 
+        type="record" 
+        name="rosbag_record_all" 
+        args="-a --duration=120 -O $(find vitulus)/bags/my_120s_recording"
+        output="log" 
+        if="$(arg record_all)"
+    />
+
     <include file="$(find vitulus_ups)/launch/vitulus_ups.launch" />
     <include file="$(find vitulus)/launch/device_state_publisher.launch" />
     <include file="$(find vitulus)/launch/nextion_lcd.launch" />
