@@ -1,12 +1,106 @@
 #!/bin/bash
 
+# =====================================================
+# Vitulus Startup Script
+# This script is designed to be run on the Vitulus robot
+# to initialize the system and start the main application.
+# It performs the following steps:
+# 1. Initializes time synchronization
+# 2. Waits for time synchronization to complete
+# 3. Sets up the ROS environment
+# 4. Starts the main application
+#
+#
+#       Before running this script, ensure that:
+#
+#       chmod +x /home/vitulus/catkin_ws/src/vitulus/vitulus/launch/vitulus.startup
+#       
+#       Create new sudoers entry for the vitulus user:
+#       sudo visudo -f /etc/sudoers.d/vitulus-time
+#       
+#       Add the following line:
+#       vitulus ALL=(ALL) NOPASSWD: /usr/bin/systemctl start systemd-timesyncd.service, /usr/bin/systemctl status systemd-timesyncd.service, /usr/bin/systemctl stop systemd-timesyncd.service, /usr/sbin/ntpdate
+# =====================================================
+
+echo "=== VITULUS STARTUP SEQUENCE ==="
+
+# =====================================================
+# Step 1: Time synchronization
+# =====================================================
+echo "[Step 1/4] Checking internet connection and syncing time..."
+
+# Function to check internet connectivity
+check_internet() {
+  echo "Checking internet connectivity..."
+  # Try to ping a well-known DNS server
+  ping -c 1 8.8.8.8 > /dev/null 2>&1
+  return $?
+}
+
+# Try to sync time using ntpdate if internet is available
+if check_internet; then
+  echo "Internet connection available. Attempting to sync time using ntpdate..."
+  
+  # Install ntpdate if not available
+  if ! command -v ntpdate > /dev/null; then
+    echo "ntpdate not found. Attempting to install..."
+    sudo apt-get update && sudo apt-get install -y ntpdate
+  fi
+  
+  # Try to sync with NTP servers with retries
+  max_attempts=5
+  attempt=1
+  sync_success=0
+  
+  while [ $attempt -le $max_attempts ] && [ $sync_success -eq 0 ]; do
+    echo "Time sync attempt $attempt/$max_attempts..."
+    if sudo ntpdate pool.ntp.org; then
+      echo "Time synchronized successfully!"
+      sync_success=1
+    else
+      echo "Time sync failed. Retrying in 5 seconds..."
+      sleep 5
+      attempt=$((attempt + 1))
+    fi
+  done
+  
+  if [ $sync_success -eq 1 ]; then
+    echo "Time synchronization completed."
+  else
+    echo "Failed to sync time after $max_attempts attempts."
+  fi
+else
+  echo "No internet connection available. Skipping ntpdate sync."
+fi
+
+# Stop the time synchronization service now that sync is complete
+echo "Stopping time synchronization service..."
+sudo systemctl stop systemd-timesyncd.service
+echo "Time sync service status after stopping:"
+sudo systemctl status systemd-timesyncd.service
+
+# =====================================================
+# Step 2: ROS environment setup
+# =====================================================
+echo "[Step 3/4] Setting up ROS environment..."
+# Source ROS setup script
+echo "Sourcing ROS Noetic..."
 source /opt/ros/noetic/setup.bash
 
+# Set ROS network configuration
+echo "Setting ROS network parameters..."
 export ROS_IP=10.254.254.254
 export ROS_MASTER_URI=http://10.254.254.254:11311
 
+# Source workspace setup and set package path
+echo "Sourcing workspace setup..."
 source /home/vitulus/catkin_ws/devel/setup.bash
 export ROS_PACKAGE_PATH=/home/vitulus/catkin_ws/src:/opt/ros/noetic/share
+echo "Rospack profile - package path:"
 rospack profile
 
+# =====================================================
+# Step 3: Start main application
+# =====================================================
+echo "[Step 4/4] Starting Vitulus main application..."
 python3 /home/vitulus/catkin_ws/src/vitulus/vitulus/nodes/main
