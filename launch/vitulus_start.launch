@@ -37,6 +37,7 @@
     <include file="$(find system_monitor)/launch/system_monitor.launch"/>
     <include file="$(find vitulus_webui)/launch/vitulus_webui.launch"/>
     <include file="$(find weather_alert)/launch/weather_alert.launch"/>
+    <include file="$(find vitulus_dock)/launch/docking.launch"/>
 
 
 <!--    ##### Show in Rviz #####-->
