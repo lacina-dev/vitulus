@@ -74,6 +74,19 @@ add_dependencies(${PROJECT_NAME}_laser_override_node
   ${catkin_EXPORTED_TARGETS}
 )
 
+add_executable(${PROJECT_NAME}_laserscan_nan2inf_node
+  src/laserscan_nan2inf.cpp
+)
+
+target_link_libraries(${PROJECT_NAME}_laserscan_nan2inf_node
+  ${catkin_LIBRARIES}
+)
+
+add_dependencies(${PROJECT_NAME}_laserscan_nan2inf_node
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
+  ${catkin_EXPORTED_TARGETS}
+)
+
 
 ################################################################################
 # Install

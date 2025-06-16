@@ -17,6 +17,8 @@
     </node>
 
     <node name="vitulus_laser_override_node" pkg="vitulus" type="vitulus_laser_override_node" output="screen"/>
+    <node name="vitulus_laserscan_nan2inf_node" pkg="vitulus" type="vitulus_laserscan_nan2inf_node" output="screen"/>
+
         
 </group>
 </launch>
