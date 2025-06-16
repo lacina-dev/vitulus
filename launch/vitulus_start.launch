@@ -5,8 +5,8 @@
 <!--    </include>-->
 
 
-       <!-- Record all topics for 120 seconds -->
-    <arg name="record_all" default="true" doc="Record all topics for 120 seconds."/>
+    <!-- Record all topics for 120 seconds if true-->
+    <arg name="record_all" default="false" doc="Record all topics for 120 seconds."/>
     <node 
         pkg="rosbag" 
         type="record" 
