@@ -39,6 +39,7 @@
     <include file="$(find weather_alert)/launch/weather_alert.launch"/>
     <include file="$(find vitulus_dock)/launch/docking.launch"/>
     <include file="$(find vitulus_rosbag)/launch/vitulus_rosbag.launch"/>
+    <include file="$(find vitulus_safety)/launch/safety.launch"/>
 
 
 <!--    ##### Show in Rviz #####-->
