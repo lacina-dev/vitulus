@@ -48,7 +48,13 @@
 
       <arg name="initial_reset"     value="true"/>
 <!--      <arg name="allow_no_texture_points"     value="true"/>-->
-      <arg name="filters"           value="decimation,temporal,hole_filling,disparity,spatial,"/>
+      <!-- Depth post-processing order fix (2026-07-18; originally landed 12.7.
+           in vitulus_bringup/vitulus_d435.launch, which is NOT in the live
+           launch chain — this file is). librealsense-recommended pipeline:
+           decimation -> disparity(transform) -> spatial -> temporal ->
+           hole_filling; spatial/temporal must run in the disparity domain.
+           This is the change that most cuts D435 salt-and-pepper noise in sun. -->
+      <arg name="filters"           value="decimation,disparity,spatial,temporal,hole_filling,"/>
       <arg name="clip_distance"     value="5"/>
 <!--      <arg name="clip_distance"     value="3.1"/>  -->
       <arg name="align_depth"       value="true"/>
