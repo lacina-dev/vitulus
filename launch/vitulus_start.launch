@@ -35,7 +35,13 @@
     <include file="$(find vitulus_navi)/launch/navi_man.launch"/>
     <include file="$(find vitulus_planner)/launch/planner.launch"/>
     <include file="$(find system_monitor)/launch/system_monitor.launch"/>
-    <include file="$(find vitulus_webui)/launch/vitulus_webui.launch"/>
+    <!-- vitulus_ui: unified single-page UI on http://<robot>:7779/. This launch
+         is self-contained: it brings up its own webnode (:7779), status_logger,
+         web_video_server, tf2_web_republisher and rosbridge (:9090). The old
+         vitulus_webui (:7777) is no longer started on boot — to bring it back,
+         re-add: <include file="$(find vitulus_webui)/launch/vitulus_webui.launch"/>
+         (note: do NOT run both, their node names / ports / rosbridge clash). -->
+    <include file="$(find vitulus_ui)/launch/vitulus_ui.launch"/>
     <include file="$(find weather_alert)/launch/weather_alert.launch"/>
     <include file="$(find vitulus_dock)/launch/docking.launch"/>
     <include file="$(find vitulus_rosbag)/launch/vitulus_rosbag.launch"/>
