@@ -42,20 +42,13 @@
       <arg name="enable_fisheye"    value="false"/>
       <arg name="enable_gyro"       value="false"/>
       <arg name="enable_accel"      value="false"/>
-      <!-- AUDIT dock-idle (2026-08-01): SDK pointcloud OFF — /d435/depth/color/points ran at 15 Hz with ZERO subscribers (obstacle pipeline builds its own cloud via depth2cloud from the depth image; the depth filter chain below is unaffected). Part of the realsense manager's 36 % CPU for nothing. -->
-      <arg name="enable_pointcloud" value="false"/>
+      <arg name="enable_pointcloud" value="true"/>
       <arg name="enable_sync"       value="true"/>
       <arg name="tf_prefix"         value="$(arg camera)"/>
 
       <arg name="initial_reset"     value="true"/>
 <!--      <arg name="allow_no_texture_points"     value="true"/>-->
-      <!-- Depth post-processing order fix (2026-07-18; originally landed 12.7.
-           in vitulus_bringup/vitulus_d435.launch, which is NOT in the live
-           launch chain — this file is). librealsense-recommended pipeline:
-           decimation -> disparity(transform) -> spatial -> temporal ->
-           hole_filling; spatial/temporal must run in the disparity domain.
-           This is the change that most cuts D435 salt-and-pepper noise in sun. -->
-      <arg name="filters"           value="decimation,disparity,spatial,temporal,hole_filling,"/>
+      <arg name="filters"           value="decimation,temporal,hole_filling,disparity,spatial,"/>
       <arg name="clip_distance"     value="5"/>
 <!--      <arg name="clip_distance"     value="3.1"/>  -->
       <arg name="align_depth"       value="true"/>

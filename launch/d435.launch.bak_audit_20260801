@@ -42,8 +42,7 @@
       <arg name="enable_fisheye"    value="false"/>
       <arg name="enable_gyro"       value="false"/>
       <arg name="enable_accel"      value="false"/>
-      <!-- AUDIT dock-idle (2026-08-01): SDK pointcloud OFF — /d435/depth/color/points ran at 15 Hz with ZERO subscribers (obstacle pipeline builds its own cloud via depth2cloud from the depth image; the depth filter chain below is unaffected). Part of the realsense manager's 36 % CPU for nothing. -->
-      <arg name="enable_pointcloud" value="false"/>
+      <arg name="enable_pointcloud" value="true"/>
       <arg name="enable_sync"       value="true"/>
       <arg name="tf_prefix"         value="$(arg camera)"/>
 
