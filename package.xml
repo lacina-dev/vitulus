@@ -5,7 +5,7 @@
   <description>Vitulus main package. Start the robot.</description>
 
   <maintainer email="robert@lacina.dev">Robert Lacina</maintainer>
-  <license>Apache 2.0</license>
+  <license>MIT</license>
   <author email="robert@lacina.dev">Robert Lacina</author>
 
 
