@@ -45,7 +45,11 @@
     <include file="$(find weather_alert)/launch/weather_alert.launch"/>
     <include file="$(find vitulus_dock)/launch/docking.launch"/>
     <include file="$(find vitulus_rosbag)/launch/vitulus_rosbag.launch"/>
-    <include file="$(find vitulus_safety)/launch/safety.launch"/>
+    <!-- lidar_objects (detekce člověka/psa/kočky z lidaru) je volitelný:
+         zapne se přepnutím na true, jinak běží jen safety_node. -->
+    <include file="$(find vitulus_safety)/launch/safety.launch">
+        <arg name="lidar_objects" value="false"/>
+    </include>
 
 
 <!--    ##### Show in Rviz #####-->
