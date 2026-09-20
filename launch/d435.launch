@@ -19,7 +19,7 @@
 
 
   <arg name="serial_no"             default=""/>
-  <arg name="json_file_path"        default="/home/vitulus/catkin_ws/src/vitulus/vitulus/launch/includes/d435HighAccuracy.json"/>
+  <arg name="json_file_path"        default="$(find vitulus)/launch/includes/d435HighAccuracy.json"/>
   <arg name="camera"                default="d435"/>
 <!--  <arg name="usb_port_id"           default="4-1"/>-->
   <arg name="usb_port_id"           default=""/>

@@ -1,0 +1,43 @@
+# Vitulus udev rules - EXAMPLE (copy of the reference robot's
+# /etc/udev/rules.d/99-vitulus.rules).
+#
+# The Vitulus nodes open fixed device names: /dev/rplidar, /dev/nextion,
+# /dev/ups, /dev/mower, /dev/gnss, /dev/gnss_heading, /dev/imu (and
+# /dev/fdcanusb for the moteus CAN adapter). These rules create them.
+#
+# MACHINE SPECIFIC: most symlinks below are bound to the physical USB port
+# (KERNELS=="<bus>-<port path>:1.0"), because several adapters share the same
+# USB vendor/product id. On your robot the port paths WILL differ. Find yours:
+#   udevadm info -a -n /dev/ttyUSB0 | grep -m1 'KERNELS=="[0-9]'
+# (plug the devices in one by one, or compare `ls -l /sys/class/tty/ttyUSB*`),
+# then edit the KERNELS values. The /dev/rplidar rule matches ANY CP210x
+# (10c4:ea60) ttyUSB adapter - bind it to a port too if you have more of them.
+#
+# Install:
+#   sudo cp 99-vitulus.rules.example /etc/udev/rules.d/99-vitulus.rules
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#   ls -l /dev/rplidar /dev/nextion /dev/ups /dev/mower /dev/gnss /dev/gnss_heading /dev/imu
+
+# Keep ModemManager away from the USB serial adapters, open permissions.
+# (see http://linux-tips.org/t/prevent-modem-manager-to-capture-usb-serial-devices/284/2)
+ATTRS{idVendor}=="0483" ATTRS{idProduct}=="5740", ENV{ID_MM_DEVICE_IGNORE}="1", MODE:="0666"
+ATTRS{idVendor}=="0483" ATTRS{idProduct}=="df11", MODE:="0666"
+ATTRS{idVendor}=="fff1" ATTRS{idProduct}=="ff48", ENV{ID_MM_DEVICE_IGNORE}="1", MODE:="0666"
+ATTRS{idVendor}=="10c4" ATTRS{idProduct}=="ea60", ENV{ID_MM_DEVICE_IGNORE}="1", MODE:="0666"
+
+KERNEL=="ttyUSB*", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", MODE:="0777", SYMLINK+="rplidar"
+SUBSYSTEM=="usb",ATTRS{idVendor}=="04d8" ATTRS{idProduct}=="d004", MODE="0666", SYMLINK+="openups"
+
+KERNEL=="ttyUSB*", KERNELS=="1-6.3:1.0", MODE:="0777", SYMLINK+="mower"
+#KERNEL=="ttyUSB*", KERNELS=="1-6.4.3:1.0", MODE:="0777", SYMLINK+="ups"
+KERNEL=="ttyUSB*", KERNELS=="1-6.2:1.0", MODE:="0777", SYMLINK+="ups"
+KERNEL=="ttyACM*", KERNELS=="1-3.2:1.0", MODE:="0777", SYMLINK+="fdcanusb"
+KERNEL=="ttyACM*", KERNELS=="1-3.3:1.0", MODE:="0777", SYMLINK+="gnss_heading"
+#KERNEL=="ttyACM*", KERNELS=="1-3:1.0", MODE:="0777", SYMLINK+="opencr"
+KERNEL=="ttyUSB*", KERNELS=="1-5:1.0", MODE:="0777", SYMLINK+="nextion"
+KERNEL=="ttyUSB*", KERNELS=="1-3.1:1.0", MODE:="0777", SYMLINK+="gnss"
+KERNEL=="ttyUSB*", KERNELS=="1-6.1:1.0", MODE:="0777", SYMLINK+="imu"
+
+# ST-Link
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="0483", GROUP="users", MODE="0666"

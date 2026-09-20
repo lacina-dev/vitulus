@@ -10,7 +10,7 @@ https://github.com/IntelRealSense/librealsense/blob/master/third-party/libtm/lib
   <arg name="usb_port_id"         default=""/>
 <!--  <arg name="usb_port_id"         default=""/>-->
   <arg name="device_type"         default="t265"/>
-  <arg name="json_file_path"      default="/home/vitulus/catkin_ws/src/vitulus/vitulus/launch/includes/t2654WD1N.json"/>
+  <arg name="json_file_path"      default="$(find vitulus)/launch/includes/t2654WD1N.json"/>
 <!--  <arg name="json_file_path"      default=""/>-->
   <arg name="camera"              default="t265"/>
   <arg name="tf_prefix"           default="$(arg camera)"/>
@@ -46,7 +46,9 @@ https://github.com/IntelRealSense/librealsense/blob/master/third-party/libtm/lib
 <!--  <arg name="pose_frame_id"             default="$(arg tf_prefix)_pose_frame"/>-->
   <arg name="pose_frame_id"             default="t265_link"/>
 <!--  <arg name="pose_frame_id"             default="base_footprint_t265"/>-->
-  <arg name="calib_odom_file"          default="/home/vitulus/catkin_ws/src/vitulus/vitulus_bringup/launch/includes/t2654WD1N.json"/>
+  <!-- Wheel-odometry calibration. Used to point into vitulus_bringup (not a
+       published repo); the tracked copy in this package is byte-identical. -->
+  <arg name="calib_odom_file"          default="$(find vitulus)/launch/includes/t2654WD1N.json"/>
   <arg name="respawn"          default="true"/>
 
 

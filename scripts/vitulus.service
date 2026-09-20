@@ -1,18 +1,32 @@
+# Vitulus systemd unit - TEMPLATE.
+#
+# systemd needs absolute paths, so this file cannot locate the workspace by
+# itself. The values below are the standard layout (user "vitulus", workspace
+# /home/vitulus/catkin_ws). If your user name or workspace differs, adjust
+# User=, WorkingDirectory= and the two paths in ExecStart= before installing.
+# vitulus.startup itself finds the workspace from its own location.
+#
+# Install:
+#   sudo cp vitulus.service /etc/systemd/system/vitulus.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable vitulus.service
+#   sudo systemctl start vitulus.service
+# Status / log:
+#   sudo systemctl status vitulus.service
+#   journalctl -u vitulus.service -f
+
 [Unit]
 Description=Vitulus Service
 After=network-online.target sshd.service
 Wants=network-online.target
-#After=network-online.target
 
 [Service]
 Type=simple
 User=vitulus
-#Group=netdev
-#EnvironmentFile=/home/vitulus/catkin_ws/src/vitulus/vitulus/launch/vitulus.env
 WorkingDirectory=/home/vitulus
 ExecStart=/bin/bash --login -c 'source /home/vitulus/.bashrc; /home/vitulus/catkin_ws/src/vitulus/vitulus/launch/vitulus.startup'
-#Restart=always
-
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

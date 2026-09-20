@@ -1,0 +1,41 @@
+# Vitulus wired network - EXAMPLE (copy of the reference robot's
+# /etc/netplan/02-vitulus-network.yaml).
+#
+# Gives the robot the fixed address 10.254.254.254 on a bridge (br0) over the
+# wired port. launch/vitulus.startup uses this address for ROS_IP and
+# ROS_MASTER_URI by default; the bridge is "optional", so the address exists
+# even with no cable plugged in. WiFi stays managed by NetworkManager
+# (01-network-manager-all.yaml) - no WiFi credentials belong in this file.
+#
+# ADAPT: "eno1" is the wired interface name of the reference computer
+# (`ip link` shows yours). If you do not want this address at all, skip this
+# file and set VITULUS_ROS_IP instead (see INSTALL.md).
+#
+# Install:
+#   sudo cp 02-vitulus-network.yaml.example /etc/netplan/02-vitulus-network.yaml
+#   sudo chmod 600 /etc/netplan/02-vitulus-network.yaml
+#   sudo netplan try
+
+network:
+  version: 2
+  renderer: networkd
+
+  ethernets:
+    eno1:
+      dhcp4: false 
+      dhcp6: false 
+      optional: true
+
+  bridges:
+    br0:
+      interfaces: [eno1]
+      addresses: [10.254.254.254/24]
+      optional: true
+      mtu: 1500
+      nameservers:
+        addresses: [8.8.8.8]
+      parameters:
+        stp: true
+        forward-delay: 4
+      dhcp4: no
+      dhcp6: no

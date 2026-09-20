@@ -13,7 +13,7 @@
 #
 #       Before running this script, ensure that:
 #
-#       chmod +x /home/vitulus/catkin_ws/src/vitulus/vitulus/launch/vitulus.startup
+#       chmod +x <workspace>/src/vitulus/vitulus/launch/vitulus.startup
 #       
 #       Create new sudoers entry for the vitulus user:
 #       sudo visudo -f /etc/sudoers.d/vitulus-time
@@ -89,13 +89,34 @@ source /opt/ros/noetic/setup.bash
 
 # Set ROS network configuration
 echo "Setting ROS network parameters..."
-export ROS_IP=10.254.254.254
-export ROS_MASTER_URI=http://10.254.254.254:11311
+# Default = the robot's fixed bridge address (br0). On a host without that
+# address set VITULUS_ROS_IP (e.g. in ~/.bashrc, sourced by vitulus.service).
+VITULUS_ROS_IP="${VITULUS_ROS_IP:-10.254.254.254}"
+export ROS_IP="$VITULUS_ROS_IP"
+export ROS_MASTER_URI="http://$VITULUS_ROS_IP:11311"
+
+# Locate the catkin workspace from this script's own location
+# (<ws>/src/vitulus/vitulus/launch/vitulus.startup): walk up until a directory
+# with devel/setup.bash is found. VITULUS_WS overrides the detection.
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+PKG_DIR="$(dirname "$SCRIPT_DIR")"
+if [ -z "$VITULUS_WS" ]; then
+  VITULUS_WS="$PKG_DIR"
+  while [ "$VITULUS_WS" != "/" ] && [ ! -f "$VITULUS_WS/devel/setup.bash" ]; do
+    VITULUS_WS="$(dirname "$VITULUS_WS")"
+  done
+fi
+if [ ! -f "$VITULUS_WS/devel/setup.bash" ]; then
+  echo "ERROR: no catkin workspace (devel/setup.bash) found above $PKG_DIR." >&2
+  echo "Build the workspace first (catkin_make) or set VITULUS_WS." >&2
+  exit 1
+fi
+echo "Catkin workspace: $VITULUS_WS"
 
 # Source workspace setup and set package path
 echo "Sourcing workspace setup..."
-source /home/vitulus/catkin_ws/devel/setup.bash
-export ROS_PACKAGE_PATH=/home/vitulus/catkin_ws/src:/opt/ros/noetic/share
+source "$VITULUS_WS/devel/setup.bash"
+export ROS_PACKAGE_PATH="$VITULUS_WS/src:/opt/ros/noetic/share"
 echo "Rospack profile - package path:"
 rospack profile
 
@@ -103,4 +124,4 @@ rospack profile
 # Step 3: Start main application
 # =====================================================
 echo "[Step 4/4] Starting Vitulus main application..."
-python3 /home/vitulus/catkin_ws/src/vitulus/vitulus/nodes/main
+python3 "$PKG_DIR/nodes/main"

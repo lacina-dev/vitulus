@@ -38,7 +38,11 @@ class MainNode:
         self.pub_nextion_stat_txt = rospy.Publisher('/nextion/status_text', String, queue_size=10)
         self.sub_restart = rospy.Subscriber("restart_core", String, self.callback_restart)
         self.restart_string = "fuse"
-        self.robot_launch = LaunchFile("/home/vitulus/catkin_ws/src/vitulus/vitulus/launch/vitulus_start.launch")
+        # Package dir derived from this file (<pkg>/nodes/main), so the launch file
+        # always comes from the same checkout/workspace as this node. realpath() of
+        # the src file is reliable even behind a catkin devel relay stub.
+        pkg_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+        self.robot_launch = LaunchFile(os.path.join(pkg_dir, "launch", "vitulus_start.launch"))
 
     # Publish text to Nextion status text box
     def publish_nextion_stat_txt(self, txt):
