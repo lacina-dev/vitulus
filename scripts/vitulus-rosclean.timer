@@ -1,0 +1,15 @@
+# Vitulus: runs vitulus-rosclean.service daily and 10 min after boot.
+# Install: see vitulus-rosclean.service.
+
+[Unit]
+Description=Vitulus: daily cleanup of old ROS logs
+
+[Timer]
+OnBootSec=10min
+OnCalendar=*-*-* 04:20:00
+# A night the robot was off is caught up after the next start.
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

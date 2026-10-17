@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""vitulus_rosclean - automatic cleanup of the ROS log directory.
+
+roslaunch only warns ("disk usage in log directory [...] is over 1GB") and
+`rosclean purge` is all-or-nothing and interactive.  This script is meant to be
+run by a systemd timer (scripts/vitulus-rosclean.timer, daily + after boot) and
+keeps the log directory bounded without ever touching the current run.
+
+Rules, in order:
+
+1. PROTECTED, never deleted:
+   * `latest` (the symlink itself) and the directory it points to,
+   * the directory of the current run (`/run_id` from the ROS master, read
+     directly over XML-RPC, so no ROS environment is needed),
+   * every entry that some process still has open (scan of /proc/*/fd;
+     container processes are matched by the path part after `.ros/log/`),
+   * every entry modified in the last --min-age-min minutes.
+2. AGE: an unprotected entry whose newest file is older than --days is deleted.
+3. SIZE CAP: if the directory is still above --max-mb, the oldest unprotected
+   entries are deleted until it fits (the default stays well under roslaunch's
+   1 GB warning).
+
+"Entry" is one top-level item of the log directory: a run directory
+(<run_id>/) or a loose file (rospy nodes started outside roslaunch write
+<name>_<pid>_<ms>.log directly into the log directory).
+
+Only the standard library is used; the script works without a ROS environment
+and when the ROS master is down (then only `latest`, open files and recent
+entries are protected).
+
+Usage:
+  vitulus_rosclean [--dry-run] [--dir DIR] [--days N] [--max-mb N]
+                   [--min-age-min N] [--verbose]
+"""
+
+import argparse
+import os
+import shutil
+import sys
+import time
+import xmlrpc.client
+
+LOG_MARK = '/.ros/log/'
+
+
+def log_dir(arg=None):
+    if arg:
+        return os.path.abspath(os.path.expanduser(arg))
+    if os.environ.get('ROS_LOG_DIR'):
+        return os.path.abspath(os.environ['ROS_LOG_DIR'])
+    home = os.environ.get('ROS_HOME') or os.path.expanduser('~/.ros')
+    return os.path.join(os.path.abspath(home), 'log')
+
+
+def current_run_id(timeout=3.0):
+    """`/run_id` from the ROS master, or None when the master is unreachable."""
+    uri = os.environ.get('ROS_MASTER_URI') or 'http://localhost:11311'
+    import socket
+    old = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(timeout)
+    try:
+        code, _msg, val = xmlrpc.client.ServerProxy(uri).getParam(
+            '/vitulus_rosclean', '/run_id')
+        return str(val) if code == 1 and val else None
+    except Exception:                                    # noqa: BLE001
+        return None
+    finally:
+        socket.setdefaulttimeout(old)
+
+
+def open_entries(root):
+    """Names of top-level entries of `root` that some process has open."""
+    names = set()
+    prefix = root.rstrip('/') + '/'
+    # Containers mount ~/.ros as e.g. /tmp/.ros, so their fds show another
+    # path; match those only when cleaning a `.ros/log` directory.
+    mark = LOG_MARK if prefix.endswith(LOG_MARK) else None
+    try:
+        pids = [p for p in os.listdir('/proc') if p.isdigit()]
+    except OSError:
+        return names
+    for pid in pids:
+        fd_dir = '/proc/%s/fd' % pid
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue                    # foreign process or already gone
+        for fd in fds:
+            try:
+                target = os.readlink(os.path.join(fd_dir, fd))
+            except OSError:
+                continue
+            if target.startswith(prefix):
+                rel = target[len(prefix):]
+            elif mark and mark in target:   # same directory, from a container
+                rel = target.split(mark, 1)[1]
+            else:
+                continue
+            rel = rel.replace(' (deleted)', '')
+            if rel:
+                names.add(rel.split('/', 1)[0])
+    return names
+
+
+def entry_stats(path):
+    """(size in bytes, newest mtime) of a file or a directory tree."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return 0, 0.0
+    if not os.path.isdir(path) or os.path.islink(path):
+        return st.st_size, st.st_mtime
+    size, newest = 0, st.st_mtime
+    for base, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                fst = os.lstat(os.path.join(base, name))
+            except OSError:
+                continue
+            size += fst.st_size
+            newest = max(newest, fst.st_mtime)
+    return size, newest
+
+
+def remove(path):
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def human(n):
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if abs(n) < 1024 or unit == 'GB':
+            return ('%.0f %s' if unit == 'B' else '%.1f %s') % (n, unit)
+        n /= 1024.0
+    return '%d B' % n
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap.add_argument('--dir', help='log directory (default: $ROS_LOG_DIR, '
+                    '$ROS_HOME/log or ~/.ros/log)')
+    ap.add_argument('--days', type=float, default=7.0,
+                    help='delete entries older than this (default 7)')
+    ap.add_argument('--max-mb', type=float, default=500.0,
+                    help='size cap of the directory in MB (default 500)')
+    ap.add_argument('--min-age-min', type=float, default=60.0,
+                    help='never delete entries younger than this (default 60)')
+    ap.add_argument('--dry-run', action='store_true',
+                    help='only print what would be deleted')
+    ap.add_argument('--verbose', action='store_true',
+                    help='list every deleted entry')
+    args = ap.parse_args(argv)
+
+    root = log_dir(args.dir)
+    if not os.path.isdir(root):
+        print('vitulus_rosclean: %s does not exist, nothing to do' % root)
+        return 0
+    now = time.time()
+
+    protected = {}
+    latest = os.path.join(root, 'latest')
+    if os.path.islink(latest):
+        protected['latest'] = 'symlink'
+        target = os.path.realpath(latest)
+        if os.path.dirname(target) == os.path.realpath(root):
+            protected[os.path.basename(target)] = 'latest'
+    run_id = current_run_id()
+    if run_id:
+        protected[run_id] = 'run_id'
+    for name in open_entries(os.path.realpath(root)):
+        protected.setdefault(name, 'open')
+
+    entries = []                       # (newest mtime, size, name)
+    total = 0
+    names = os.listdir(root)
+    for name in names:
+        size, newest = entry_stats(os.path.join(root, name))
+        total += size
+        if name in protected:
+            continue
+        if now - newest < args.min_age_min * 60.0:
+            protected[name] = 'recent'
+            continue
+        entries.append((newest, size, name))
+    entries.sort()
+
+    doomed = []
+    keep = []
+    for newest, size, name in entries:
+        if now - newest > args.days * 86400.0:
+            doomed.append((newest, size, name, 'age'))
+        else:
+            keep.append((newest, size, name))
+    after = total - sum(d[1] for d in doomed)
+    cap = args.max_mb * 1024 * 1024
+    for newest, size, name in keep:          # oldest first
+        if after <= cap:
+            break
+        doomed.append((newest, size, name, 'cap'))
+        after -= size
+
+    verb = 'would delete' if args.dry_run else 'deleted'
+    print('vitulus_rosclean: %s  run_id=%s  total=%s  entries=%d'
+          % (root, run_id or '-(master down)', human(total), len(names)))
+    print('  protected: %s' % ', '.join(
+        '%s(%s)' % (k, v) for k, v in sorted(protected.items(),
+                                             key=lambda kv: kv[1])
+        if v != 'recent') + ('  + %d recent' % sum(
+            1 for v in protected.values() if v == 'recent')))
+    by_age = [d for d in doomed if d[3] == 'age']
+    by_cap = [d for d in doomed if d[3] == 'cap']
+    print('  %s: %d entries / %s older than %g days, %d entries / %s over cap %g MB'
+          % (verb, len(by_age), human(sum(d[1] for d in by_age)), args.days,
+             len(by_cap), human(sum(d[1] for d in by_cap)), args.max_mb))
+    shown = doomed if args.verbose else doomed[:10]
+    for newest, size, name, why in shown:
+        print('    %s  %-8s %-4s %s' % (time.strftime('%Y-%m-%d %H:%M',
+                                                     time.localtime(newest)),
+                                        human(size), why, name))
+    if len(doomed) > len(shown):
+        print('    ... and %d more (--verbose lists all)' % (len(doomed) - len(shown)))
+    if not args.dry_run:
+        for _n, _s, name, _w in doomed:
+            remove(os.path.join(root, name))
+    print('  size %s: %s -> %s' % ('after (estimate)' if args.dry_run else 'after',
+                                   human(total), human(after)))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

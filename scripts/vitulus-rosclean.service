@@ -1,0 +1,27 @@
+# Vitulus: cleanup of the ROS log directory (~/.ros/log) - systemd USER unit.
+#
+# Started by vitulus-rosclean.timer.  Never deletes `latest`, the current run
+# (/run_id), open files or entries younger than 60 min; deletes entries older
+# than 7 days and then the oldest ones above a 500 MB cap.  See the header of
+# vitulus_rosclean for the rules.  %h = home of the user running the unit;
+# adjust the path if your workspace is not ~/catkin_ws.
+#
+# Install (as the robot user, no sudo):
+#   mkdir -p ~/.config/systemd/user
+#   cp vitulus-rosclean.service vitulus-rosclean.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now vitulus-rosclean.timer
+#   sudo loginctl enable-linger $USER   # timers run without a login session
+# Status / log:
+#   systemctl --user list-timers vitulus-rosclean.timer
+#   journalctl --user -u vitulus-rosclean.service
+
+[Unit]
+Description=Vitulus: cleanup of old ROS logs (~/.ros/log)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/catkin_ws/src/vitulus/vitulus/scripts/vitulus_rosclean --days 7 --max-mb 500
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1800

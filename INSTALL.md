@@ -211,6 +211,23 @@ The service restarts the whole chain 5 s after it exits; publishing `fuse` on
 
 Then open `http://<robot>:7779/`.
 
+### ROS log cleanup (user timer)
+
+ROS writes every run into `~/.ros/log` and never deletes anything; roslaunch
+only warns once the directory is over 1 GB. `scripts/vitulus_rosclean` keeps
+it bounded: it never touches `latest`, the current run (`/run_id`), open files
+or anything younger than 60 min, deletes entries older than 7 days and then
+the oldest ones above 500 MB. It runs daily and 10 min after boot:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp ~/catkin_ws/src/vitulus/vitulus/scripts/vitulus-rosclean.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now vitulus-rosclean.timer
+sudo loginctl enable-linger $USER          # user timers run without a login
+~/catkin_ws/src/vitulus/vitulus/scripts/vitulus_rosclean --dry-run   # preview
+```
+
 ## 7. First boot on an empty robot
 
 All robot data lives outside the source tree and is created as you go:
