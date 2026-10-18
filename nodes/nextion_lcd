@@ -10,6 +10,7 @@ import sys
 import signal
 import serial
 import struct
+import threading
 from std_srvs.srv import EmptyRequest, Empty
 
 PAGE_INTRO = 0
@@ -72,6 +73,13 @@ class Node:
         self.msg_icon_status.gnss = "DISABLED"
         self.msg_icon_status.wifi = "DISABLED"
 
+        # Serial port is shared by the main loop, the 5 Hz read timer and topic callbacks.
+        # All access goes through port_lock; port is None while (re)connecting.
+        self.port = None
+        self.port_lock = threading.RLock()
+        self._last_port_error = 0.0
+        self._next_reconnect = 0.0
+
         self.pub_conn_add = rospy.Publisher('/nmcli/conn_add', NmConnAdd, queue_size=10)
         self.pub_conn_del = rospy.Publisher('/nmcli/conn_del', String, queue_size=10)
         self.pub_conn_activate = rospy.Publisher('/nmcli/conn_activate', String, queue_size=10)
@@ -111,7 +119,10 @@ class Node:
         self.current_page = 0
         self.last_page = 0
 
-        self.init_nextion()
+        try:
+            self.init_nextion()
+        except (serial.SerialException, OSError) as e:
+            self.port_error(e, "initial connect")
         self.timer_read_serial = rospy.Timer(rospy.Duration(1.0 / 5), self.read_serial)
 
     def publish_mower_set_motor_rpm(self, rpm):
@@ -245,12 +256,8 @@ class Node:
         self.msg_mower_programs = msg
         prog_list = self.msg_mower_programs.program_list
         for i in range(0, 8):
-            try:
-                if prog_list[i]:
-                    self.port.write(
-                        ('program.b{}.txt="{}"{}'.format(i, prog_list[i].name, self.eof)).encode('iso8859_1'))
-            except:
-                pass
+            if i < len(prog_list) and prog_list[i]:
+                self.safe_write('program.b{}.txt="{}"'.format(i, prog_list[i].name))
 
     # callback map list
     def callback_map_list(self, msg):
@@ -270,68 +277,145 @@ class Node:
 
     # write to status text box on main page
     def nextion_write_status_text(self, text):
-        self.port.write(('main.t1.txt="{}"{}'.format(text, self.eof)).encode('iso8859_1'))  # Status text
+        self.safe_write('main.t1.txt="{}"'.format(text))  # Status text
 
     # write to log info text box on main page
     def nextion_write_log_info_text(self, text):
-        self.port.write(('main.t0.txt="{}"{}'.format(text, self.eof)).encode('iso8859_1'))  # Log info text
+        self.safe_write('main.t0.txt="{}"'.format(text))  # Log info text
+
+    def port_ok(self):
+        return self.port is not None and self.port.is_open
+
+    def safe_write(self, cmd):
+        """Write one Nextion command from a callback thread. Dropped (not raised) while the
+        port is closed or being reconnected - the main loop rewrites the screen anyway."""
+        with self.port_lock:
+            if not self.port_ok():
+                return False
+            try:
+                self.port.write((cmd + self.eof).encode('iso8859_1'))
+                return True
+            except (serial.SerialException, OSError) as e:
+                self.port_error(e, "write")
+                return False
+
+    def port_error(self, err, where):
+        """Serial failure: log it, close the port; the main loop reconnects."""
+        with self.port_lock:
+            now = time.time()
+            if now - self._last_port_error > 30.0:
+                rospy.logerr("<{}> Nextion serial error ({}): {}: {} - reconnecting.".format(
+                    rospy.get_caller_id(), where, type(err).__name__, err))
+            else:
+                rospy.logwarn_throttle(30, "<{}> Nextion serial error ({}): {}".format(
+                    rospy.get_caller_id(), where, err))
+            self._last_port_error = now
+            try:
+                if self.port is not None:
+                    self.port.close()
+            except Exception:  # noqa: BLE001 - closing a broken port
+                pass
+            self.port = None
+            self._next_reconnect = now + 2.0
+
+    def ensure_connected(self):
+        """Called from the main loop: reopen the port after an error (2 s backoff)."""
+        if self.port_ok():
+            return True
+        if time.time() < self._next_reconnect:
+            return False
+        try:
+            self.init_nextion()
+            return True
+        except (serial.SerialException, OSError) as e:
+            self.port_error(e, "reconnect")
+            self._next_reconnect = time.time() + 5.0
+            return False
 
     def init_nextion(self):
-        rospy.loginfo("<{}> Connecting to nextion serial 9600 baud.".format(rospy.get_caller_id()))
-        self.port = serial.Serial(port='/dev/nextion', baudrate=9600, timeout=1.0)
-        self.port.write((self.no_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 0%
-        self.port.write((self.no_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 0%
-        time.sleep(1)
-        self.port.write(("baud=115200" + self.eof).encode('iso8859_1'))
-        self.port.close()
-        rospy.loginfo("<{}> Nextion serial closed.".format(rospy.get_caller_id()))
-        time.sleep(0.15)
-        rospy.loginfo("<{}> Connecting to nextion serial 115200 baud.".format(rospy.get_caller_id()))
-        self.port = serial.Serial(port='/dev/nextion', baudrate=115200, timeout=1.0)
-        self.port.write((self.no_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 0%
-        self.port.write((self.no_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 0%
-        time.sleep(1)
-        self.port.write((self.full_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 100%
-        self.port.write((self.full_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 100%
-        rospy.loginfo("<{}> Nextion serial connected.".format(rospy.get_caller_id()))
+        # Held for the whole baud switch: callbacks (log_info, status_text, ...) and the read
+        # timer must not touch the port while it is closed/reopened (PortNotOpenError).
+        with self.port_lock:
+            if self.port is not None:
+                try:
+                    self.port.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                self.port = None
+            rospy.loginfo("<{}> Connecting to nextion serial 9600 baud.".format(rospy.get_caller_id()))
+            port = serial.Serial(port='/dev/nextion', baudrate=9600, timeout=1.0)
+            port.write((self.no_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 0%
+            port.write((self.no_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 0%
+            time.sleep(1)
+            port.write(("baud=115200" + self.eof).encode('iso8859_1'))
+            port.close()
+            rospy.loginfo("<{}> Nextion serial closed.".format(rospy.get_caller_id()))
+            time.sleep(0.15)
+            rospy.loginfo("<{}> Connecting to nextion serial 115200 baud.".format(rospy.get_caller_id()))
+            port = serial.Serial(port='/dev/nextion', baudrate=115200, timeout=1.0)
+            port.write((self.no_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 0%
+            port.write((self.no_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 0%
+            time.sleep(1)
+            port.write((self.full_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 100%
+            port.write((self.full_brightnes + self.eof).encode('iso8859_1'))  # set screen brightness to 100%
+            self.port = port
+            rospy.loginfo("<{}> Nextion serial connected.".format(rospy.get_caller_id()))
 
     def read_serial(self, event=False):
-        # print(event)
-        bytesToRead = self.port.inWaiting()
-        if bytesToRead > 0:
-            data = self.port.read(bytesToRead)
-            data = data.split(b"\xff\xff\xff")
-            for message in data:
-                if len(message) > 0:
-                    message_type = chr(message[0])
-                    # print(message_type)
-                    if message_type == 'q':  # If is current page message
-                        self.last_page = self.current_page
-                        # print(message)
-                        try:
-                            data1 = struct.unpack("BBBBB", message)
-                            self.current_page = data1[1]
-                            # print("Page id: {}".format(self.current_page))
+        # Called from the 5 Hz timer AND from nextion_write (main loop). Without the lock the
+        # two threads raced on the same fd: one saw bytes waiting, the other consumed them, and
+        # read() raised "device reports readiness to read but returned no data" -> exit 1.
+        with self.port_lock:
+            if not self.port_ok():
+                return
+            try:
+                bytesToRead = self.port.inWaiting()
+                data = self.port.read(bytesToRead) if bytesToRead > 0 else b''
+            except (serial.SerialException, OSError) as e:
+                self.port_error(e, "read")
+                return
+            if data:
+                try:
+                    self._handle_serial_data(data)
+                except (serial.SerialException, OSError) as e:
+                    self.port_error(e, "write after read")
+                except Exception as e:  # noqa: BLE001 - one bad frame must not kill the read timer
+                    rospy.logwarn_throttle(30, "<{}> Nextion: bad serial frame {!r}: {}: {}".format(
+                        rospy.get_caller_id(), data[:40], type(e).__name__, e))
 
-                        except:
-                            # print("Serial data reading problem")
-                            data1 = struct.unpack("cBBB", message)
-                            self.current_page = data1[1]
-                            # print("Page id: {} data1: {} data2: {} data3: {} ".format(self.current_page, data1[1], data1[2], data1[3]))
+    def _handle_serial_data(self, data):
+        data = data.split(b"\xff\xff\xff")
+        for message in data:
+            if len(message) > 0:
+                message_type = chr(message[0])
+                # print(message_type)
+                if message_type == 'q':  # If is current page message
+                    self.last_page = self.current_page
+                    # print(message)
+                    try:
+                        data1 = struct.unpack("BBBBB", message)
+                        self.current_page = data1[1]
+                        # print("Page id: {}".format(self.current_page))
+
+                    except:
+                        # print("Serial data reading problem")
+                        data1 = struct.unpack("cBBB", message)
+                        self.current_page = data1[1]
+                        # print("Page id: {} data1: {} data2: {} data3: {} ".format(self.current_page, data1[1], data1[2], data1[3]))
 
 
-                    if message_type == 'e':  # If is button message
-                        data = struct.unpack("cBBB", message)
-                        screen = data[1]
-                        id = data[2]
-                        action = data[3]
-                        print("screen: {} \tid: {} \t action: {} ".format(screen, id, action))
-                        self.publish_pm_play_melody(5)
+                if message_type == 'e':  # If is button message
+                    data = struct.unpack("cBBB", message)
+                    screen = data[1]
+                    id = data[2]
+                    action = data[3]
+                    print("screen: {} \tid: {} \t action: {} ".format(screen, id, action))
+                    self.publish_pm_play_melody(5)
 
-                    if message_type == 'p':  # If is string message
-                        nexmsg = message[1:].decode().split("|")
-                        print(nexmsg[0])
-                        self.string_event(nexmsg)
+                if message_type == 'p':  # If is string message
+                    nexmsg = message[1:].decode().split("|")
+                    print(nexmsg[0])
+                    self.string_event(nexmsg)
 
     def string_event(self, message):
         # Scan wireless network
@@ -912,8 +996,19 @@ class Node:
 
 
     def nextion_write(self):
+        with self.port_lock:
+            if not self.ensure_connected():
+                return
+            try:
+                self._nextion_write()
+            except (serial.SerialException, OSError) as e:
+                self.port_error(e, "main loop")
+
+    def _nextion_write(self):
         self.port.write(("get dp{}".format(self.eof)).encode('iso8859_1'))  # get page
         self.read_serial()
+        if not self.port_ok():
+            return
 
         dt_object = datetime.fromtimestamp(int(rospy.get_time()))
 
@@ -951,8 +1046,11 @@ if __name__ == '__main__':
         signal.signal(signal.SIGINT, signal_handler)
 
         while not rospy.is_shutdown():
-            # node.read_serial()
-            node.nextion_write()
+            try:
+                node.nextion_write()
+            except Exception as e:  # noqa: BLE001 - keep the display node alive, log instead of exit 1
+                rospy.logerr_throttle(30, "<{}> nextion_write failed: {}: {}".format(
+                    rospy.get_caller_id(), type(e).__name__, e))
             r.sleep()
 
     except rospy.ROSInterruptException:
