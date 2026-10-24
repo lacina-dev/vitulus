@@ -117,6 +117,12 @@ echo "Catkin workspace: $VITULUS_WS"
 echo "Sourcing workspace setup..."
 source "$VITULUS_WS/devel/setup.bash"
 export ROS_PACKAGE_PATH="$VITULUS_WS/src:/opt/ros/noetic/share"
+# Node stdout goes to ~/.ros/log/<run>/<node>-N-stdout.log (output="log").
+# Without these, Python (print, rospy.loginfo) and roscpp block-buffer stdout
+# into a file: lines appear minutes late and the tail is lost on a crash.
+export PYTHONUNBUFFERED=1
+export ROSCONSOLE_STDOUT_LINE_BUFFERED=1
+
 echo "Rospack profile - package path:"
 rospack profile
 

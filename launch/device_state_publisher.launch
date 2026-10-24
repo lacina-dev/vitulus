@@ -4,7 +4,7 @@
     <group ns="$(arg arg_ns)">
 
         <!--    #### Node device_state_publisher  #####-->
-        <node name="device_state_publisher" pkg="vitulus" type="device_state_publisher" respawn="true" respawn_delay="1" output="screen">
+        <node name="device_state_publisher" pkg="vitulus" type="device_state_publisher" respawn="true" respawn_delay="1" output="log">
 <!--            <param name="prm_name" value="prm_value"/>-->
 <!--            <remap from="/topic" to="/another_topic" />-->
         </node>

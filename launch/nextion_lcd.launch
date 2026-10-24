@@ -4,7 +4,7 @@
     <group ns="$(arg arg_ns)">
 
         <!--    #### Node nextion_lcd  #####-->
-        <node name="nextion_lcd" pkg="vitulus" type="nextion_lcd" respawn="true" respawn_delay="1" output="screen">
+        <node name="nextion_lcd" pkg="vitulus" type="nextion_lcd" respawn="true" respawn_delay="1" output="log">
 <!--            <param name="prm_name" value="prm_value"/>-->
 <!--            <remap from="/topic" to="/another_topic" />-->
         </node>

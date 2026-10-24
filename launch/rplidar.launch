@@ -5,7 +5,7 @@
     
 <group ns="rplidar">
     <arg name="set_frame_id" default="base_scan"/>
-    <node name="rplidarNode"          pkg="rplidar_ros"  type="rplidarNode" respawn="true" respawn_delay="1" output="screen">
+    <node name="rplidarNode"          pkg="rplidar_ros"  type="rplidarNode" respawn="true" respawn_delay="1" output="log">
         <param name="serial_port"         type="string" value="/dev/rplidar"/>
         <param name="serial_baudrate"     type="int"    value="460800"/><!--C3 -->
         <!--param name="serial_baudrate"     type="int"    value="256000"--><!--A3 -->
@@ -16,8 +16,8 @@
         <param name="scan_mode"           type="string" value="Standard"/>   <!--  Legacy, Express, Boost, (Standard?)-->
     </node>
 
-    <node name="vitulus_laser_override_node" pkg="vitulus" type="vitulus_laser_override_node" output="screen"/>
-    <node name="vitulus_laserscan_nan2inf_node" pkg="vitulus" type="vitulus_laserscan_nan2inf_node" output="screen"/>
+    <node name="vitulus_laser_override_node" pkg="vitulus" type="vitulus_laser_override_node" output="log"/>
+    <node name="vitulus_laserscan_nan2inf_node" pkg="vitulus" type="vitulus_laserscan_nan2inf_node" output="log"/>
 
         
 </group>

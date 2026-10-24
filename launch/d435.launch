@@ -28,6 +28,8 @@
     <include file="$(find realsense2_camera)/launch/includes/nodelet.launch.xml">
       <arg name="serial_no"         value="$(arg serial_no)"/>
       <arg name="json_file_path"    value="$(arg json_file_path)"/>
+      <!-- realsense manager stdout -> ~/.ros/log/<run>/d435-realsense2_camera_manager-N-stdout.log (not the vitulus journal) -->
+      <arg name="output"            value="log"/>
       <arg name="usb_port_id"         value="$(arg usb_port_id)"/>
       <arg name="depth_width"       value="640"/> <!--  1280 848 640 640 480 424 -->
       <arg name="depth_height"      value="480"/> <!--  720 480 480 360 270 240 -->
