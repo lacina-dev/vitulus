@@ -126,6 +126,28 @@ export ROSCONSOLE_STDOUT_LINE_BUFFERED=1
 echo "Rospack profile - package path:"
 rospack profile
 
+# T10 traversability node (launch/includes/traversability.launch): on when the package is in the workspace, unless
+# set explicitly (VITULUS_TRAVERSABILITY_NODE=false in ~/.bashrc). Never without the package (a robot of the field kit:
+# the include would break the whole stack) and never together with the older start from vitulus_depth_obstacles
+# (VITULUS_TRAVERSABILITY=true): two /traversability_local with respawn shut each other down endlessly.
+trav_on() { case "$(echo "$1" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in 1|true|yes|on) return 0;; esac; return 1; }
+if trav_on "${VITULUS_TRAVERSABILITY:-}"; then
+  [ -n "${VITULUS_TRAVERSABILITY_NODE+x}" ] && trav_on "$VITULUS_TRAVERSABILITY_NODE" && \
+    echo "WARNING: VITULUS_TRAVERSABILITY=true starts traversability_local from vitulus_depth_obstacles: the stack start is off"
+  export VITULUS_TRAVERSABILITY_NODE=false
+elif [ -z "${VITULUS_TRAVERSABILITY_NODE+x}" ] || trav_on "$VITULUS_TRAVERSABILITY_NODE"; then
+  if rospack find vitulus_traversability > /dev/null 2>&1; then
+    export VITULUS_TRAVERSABILITY_NODE=true
+  else
+    [ -n "${VITULUS_TRAVERSABILITY_NODE+x}" ] && \
+      echo "WARNING: VITULUS_TRAVERSABILITY_NODE=true but vitulus_traversability is not in the workspace: off"
+    export VITULUS_TRAVERSABILITY_NODE=false
+  fi
+else
+  export VITULUS_TRAVERSABILITY_NODE=false
+fi
+echo "VITULUS_TRAVERSABILITY_NODE=$VITULUS_TRAVERSABILITY_NODE"
+
 # =====================================================
 # Step 3: Start main application
 # =====================================================

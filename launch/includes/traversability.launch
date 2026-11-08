@@ -1,0 +1,19 @@
+<launch>
+  <!-- vitulus_traversability (T10): local 6 x 6 m terrain map from the D435 clouds of vitulus_depth_obstacles
+       (/cloudXYZ, /obstacles_cloud). ONLY PUBLISHES: /traversability/local_costmap, /traversability/ui (for the UI,
+       std_msgs/String JSON, 2 Hz, only while subscribed), ~stats. The navigation does not use it: the costmap layer
+       stays off (vitulus_navi VITULUS_TRAVERSABILITY_NAV). Background priority (nice 19, the stack convention for
+       work that only informs). Without clouds (navigation stopped) it idles.
+       On by default when the package is in the workspace (vitulus.startup sets VITULUS_TRAVERSABILITY_NODE); a robot
+       without vitulus_traversability (it is not in the field kit) never evaluates the include below, also when
+       VITULUS_TRAVERSABILITY_NODE=true is set by hand (vitulus.startup checks the package). Off by hand:
+       VITULUS_TRAVERSABILITY_NODE=false in ~/.bashrc. With VITULUS_TRAVERSABILITY=true (the older start from
+       vitulus_depth_obstacles) vitulus.startup switches this start off: never two instances. -->
+  <arg name="enabled" default="$(optenv VITULUS_TRAVERSABILITY_NODE false)"/>
+  <include if="$(eval str(arg('enabled')).strip().lower() in ('1', 'true', 'yes', 'on'))"
+           file="$(find vitulus_traversability)/launch/traversability.launch">
+    <arg name="respawn" value="true"/>
+    <arg name="respawn_delay" value="10"/>
+    <arg name="launch_prefix" value="nice -n 19"/>
+  </include>
+</launch>
