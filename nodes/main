@@ -12,6 +12,44 @@ import sys
 import signal
 
 
+def _keep_node_logging(configure):
+    """roslaunch.configure_logging() - which a script that starts launch files
+    has to call - reloads the python logging configuration: the handlers of
+    the loggers `root` and `rosout` are closed and replaced by roslaunch's
+    own. For a NODE that means its log file ends there and its warnings and
+    errors never reach /rosout again (they go to
+    ~/.ros/log/latest/roslaunch-<host>-<pid>.log and stderr only). The
+    wrapper puts the node's handlers and levels back after every call; the
+    launched nodes log on their own as before, and what roslaunch itself says
+    in this process now lands in the node's log file."""
+    def configure_logging(uuid):
+        import logging
+        saved = [(lg, list(lg.handlers), lg.level, lg.propagate)
+                 for lg in (logging.getLogger(), logging.getLogger('rosout'))]
+        try:
+            return configure(uuid)
+        finally:
+            for lg, handlers, level, propagate in saved:
+                if handlers:            # logging not set up yet: leave roslaunch's
+                    for h in list(lg.handlers):
+                        if h not in handlers:
+                            lg.removeHandler(h)
+                            try:
+                                h.close()
+                            except Exception:
+                                pass
+                    lg.handlers[:] = handlers
+                    lg.setLevel(level)
+                    lg.propagate = propagate
+    configure_logging._keeps_node_logging = True
+    configure_logging._original = configure
+    return configure_logging
+
+
+if not getattr(roslaunch.configure_logging, '_keeps_node_logging', False):
+    roslaunch.configure_logging = _keep_node_logging(roslaunch.configure_logging)
+
+
 
 class LaunchFile:
     def __init__(self, launchfile):
