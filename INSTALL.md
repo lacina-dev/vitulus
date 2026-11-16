@@ -164,8 +164,8 @@ copied from the reference robot.
   set `VITULUS_ROS_IP` to an address the host does have (e.g. in `~/.bashrc`,
   which `vitulus.service` sources).
 * **sudoers.** Two passwordless rules for the robot user:
-  * time sync — `vitulus.startup` runs `ntpdate` and stops
-    `systemd-timesyncd`. `sudo visudo -f /etc/sudoers.d/vitulus-time`:
+  * time sync — `vitulus.startup` runs `ntpdate` and then keeps
+    `systemd-timesyncd` running (`VITULUS_TIMESYNC_KEEP=0` stops it as before). `sudo visudo -f /etc/sudoers.d/vitulus-time`:
     ```
     vitulus ALL=(ALL) NOPASSWD: /usr/bin/systemctl start systemd-timesyncd.service, /usr/bin/systemctl status systemd-timesyncd.service, /usr/bin/systemctl stop systemd-timesyncd.service, /usr/sbin/ntpdate
     ```

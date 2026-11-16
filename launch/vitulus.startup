@@ -73,11 +73,20 @@ else
   echo "No internet connection available. Skipping ntpdate sync."
 fi
 
-# Stop the time synchronization service now that sync is complete
-echo "Stopping time synchronization service..."
-sudo systemctl stop systemd-timesyncd.service
-echo "Time sync service status after stopping:"
-sudo systemctl status systemd-timesyncd.service
+# Time synchronization service after the initial sync (T36, 2026-11-16).
+# The robot now starts with the motors off, so the service may keep running: without it the
+# system clock drifts 0.09 s/h against GPS time and the localization pairs GPS samples badly.
+# It used to be stopped here because a clock change upset the wheel PID and jerked the robot.
+# ROLLBACK: VITULUS_TIMESYNC_KEEP=0 (e.g. in ~/.bashrc, sourced by vitulus.service) stops it as before.
+if [ "${VITULUS_TIMESYNC_KEEP:-1}" = "1" ]; then
+  echo "Keeping the time synchronization service running..."
+  sudo systemctl start systemd-timesyncd.service
+else
+  echo "Stopping time synchronization service (VITULUS_TIMESYNC_KEEP=0)..."
+  sudo systemctl stop systemd-timesyncd.service
+fi
+echo "Time sync service status:"
+sudo systemctl status systemd-timesyncd.service --no-pager
 
 # =====================================================
 # Step 2: ROS environment setup
