@@ -1,5 +1,12 @@
 <launch>
 
+    <!-- T39: rospy asks the master for this parameter on EVERY log line while it is not set
+         (rospy/impl/rosout.py get_param_cached -> subscribeParam; an unset parameter is never
+         cached): 28 XML-RPC calls a minute in the dock (rosbridge, node_mower, navi_transform,
+         weather_alert), one blocking round trip per logged line when a node gets chatty.
+         Set to its default, it is cached once per node. false = topics in /rosout as before. -->
+    <param name="/rosout_disable_topics_generation" value="false" />
+
 <!--    <include file="$(find vitulus)/launch/main.launch">-->
 <!--    <arg name="arg_name" value="$(arg arg_val)"/>-->
 <!--    </include>-->
