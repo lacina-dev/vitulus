@@ -186,9 +186,36 @@ copied from the reference robot.
 ```bash
 cd ~/catkin_ws
 source /opt/ros/noetic/setup.bash
+catkin config --append-args --cmake-args -DCMAKE_BUILD_TYPE=Release   # once per workspace, see below
 catkin build            # catkin_tools, as on the reference robot (package READMEs use catkin_make)
 source devel/setup.bash
 ```
+
+### Build type: Release (since 2026-11-17)
+
+The workspace is built **optimized**: the catkin profile carries
+`-DCMAKE_BUILD_TYPE=Release` (`catkin config` shows it under *Additional CMake Args*;
+it lives in `~/catkin_ws/.catkin_tools/profiles/default/config.yaml`, not in git). Until
+2026-11-16 the profile had no build type, so every package that does not set one itself
+(`costmap_2d`, `mbf_*`, `navfn`, `global_planner`, `vitulus_local_costmap`, `vitulus_base`,
+`laser_filters`, `web_video_server`, `ublox_gps`, … 104 packages) was compiled without `-O`:
+`mbf_costmap_nav` took ~45 % of a core in the dock instead of ~6-9 %, `local_costmap_node`
+~27 % instead of ~4 %. A new workspace without that line is that slow again.
+
+- Check: `grep -c -- " -O" ~/catkin_ws/build/costmap_2d/compile_commands.json` must not be 0.
+- Every `catkin build <packages>` (also the automatic builds of the field kit) uses the active
+  profile, so nothing else has to be told. Do **not** run `catkin_make` in this workspace and do
+  not build from a shell that sourced `install/setup.bash` (it puts `install` first in
+  `devel/_setup_util.py`; after a build `grep -n "CMAKE_PREFIX_PATH = r" devel/_setup_util.py`
+  must show `devel;/opt/ros/noetic`).
+- A full rebuild takes ~30 min (`catkin build -p1 -j2`); a change of the profile's CMake args
+  needs `catkin build --force-cmake`.
+- Debugging a crash: rebuild only that package with debug info,
+  `catkin build <pkg> --no-deps --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo` (same speed,
+  ~13x larger binaries; the next plain `catkin build <pkg>` is Release again).
+- Going back (not recommended): `catkin config --remove-args -DCMAKE_BUILD_TYPE=Release`, then
+  `catkin build --force-cmake` and a stack restart. `Release` defines `NDEBUG` (no `assert`,
+  no Eigen bounds checks) - the same as the ROS binary packages.
 
 `vitulus.startup` needs `<workspace>/devel/setup.bash`.
 
