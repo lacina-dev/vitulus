@@ -129,6 +129,10 @@ ships `obstacles_engine: depth_obstacles`: `navi_man` then starts
 obstacle clouds. Check after the first start: `rosnode info /depth_obstacles`
 answers and its PID stays the same over a minute.
 
+The navigation's optional switches (all off by default, except the `dock_idle`
+`resume_on_start` fix) are listed in one place only:
+`vitulus_navi/docs/NAVIGACE_MAPA.md`.
+
 Optional, not needed to boot: `vitulus_teleop`, and three repositories the
 field kit does not deploy (§9):
 
@@ -454,8 +458,8 @@ source devel/setup.bash
 * `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` writes
   `build/<pkg>/compile_commands.json` (used by the check above and by clangd);
   it costs nothing at run time.
-* A full build takes ~30 min (`catkin build -p1 -j2` when memory is short); a
-  change of the profile's CMake args needs `catkin build --force-cmake`.
+* A full build takes ~30 min; a change of the profile's CMake args needs
+  `catkin build --force-cmake`.
 * Debugging a crash: `catkin build <pkg> --no-deps --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo`
   (same speed, ~13x larger binaries; the next plain `catkin build <pkg>` is
   Release again). `Release` defines `NDEBUG`, like the ROS binary packages.
@@ -703,25 +707,42 @@ done
   week, distances from zone edges, obstacles and the dock) and make the agent
   pick test points spread over the zones. The record is
   `~/.vitulus/agent/lawn/wear.jsonl` (created by itself, kept 30 days).
-* **Standing rain rule** — set once, by a sentence to the agent in the chat,
-  e.g. *"Watch the rain: whenever it starts raining and the robot is outside
-  the dock, interrupt what you are doing, return to the dock and tell me."*
-  The agent stores it as a standing watch rule (rain and not in the dock →
-  dock, with interrupt). Check: ask the agent to list its watch rules — the
-  rule is `active`. Limits and quiet hours: `config/agent/watch_rules.yaml`.
+* **Standing rain rules** — set once, by two sentences to the agent in the
+  chat, in the sense of: *"Whenever it rains and the robot is outside the
+  dock, interrupt what you are doing, return to the dock and tell me."* and
+  *"Do the same when rain is due within 20 minutes."* The agent stores them
+  as standing watch rules and, only while the robot is outside the dock, reads
+  `GET /rain_nearby` of the precipitation service (§3; `vitulus_precip` at
+  `c8443c6` or newer, about 4 MB/h while watching). Check: ask the agent to
+  list its watch rules — both are `active`. Limits and quiet hours:
+  `config/agent/watch_rules.yaml`.
+* **Automatic approval** is the owner's switch in the agent panel, with three
+  scopes: motion, mower, escalation (docker / sudo-class tools). On a new
+  robot it is **off** (no `~/.vitulus/agent/auto_approve.yaml` = everything
+  that can end in driving or mowing waits for a human yes). Switching it on
+  without naming a scope allows motion only. Recommended: keep the mower out
+  of automatic approval. It never relaxes the safety layer, the dock permit
+  or `dry_run`.
 
 ### Models: the owner's policy and the configuration
 
-* **Order of model providers:** Claude (subscription, the one-year token
-  above) → ChatGPT (`codex`) → DeepSeek (its key in `secrets.env`). The two
-  fallbacks are for work **off the robot** only, when the Claude limit is used
-  up. **No paid Claude credits.**
+* **Who does the work:** `config/agent/backends.yaml` ships
+  `brain.executor: model` (agent `12497e7` or newer): background jobs,
+  sub-agents and the chat's backup run through `claude -p` on the Claude
+  **subscription** (the token above). **No paid Claude credits.**
+* **Order of sources** (`executor_backends`): Claude → Hermes / ChatGPT
+  (`codex`) → DeepSeek (its key in `secrets.env`). The fallbacks take over
+  only when Claude is down or its limit is used up, and only for work **off
+  the robot**; work that touches the robot never switches and waits.
+* **Hermes is optional.** A source whose program is not installed is skipped
+  ("not on PATH") and the next one answers, so a new robot starts without
+  Hermes; its installation is not part of this document.
+* Going back is one line, `executor: hermes`, plus a restart of the four
+  services. The executor's control directory `~/.vitulus/agent-executor`
+  (settings with the shell-gate hook, run files) is managed by the agent —
+  never edit it by hand.
 * The judge of a piece of work must not be the model that did it; it may be
   another Claude model (opus ↔ sonnet).
-* Hermes (the `hermes` CLI on ChatGPT) is the previous, optional executor of
-  background jobs and is being replaced by `claude -p`; its installation is
-  not part of this document. `backends.yaml` still names it as the chat
-  engine; when it is absent or slow the core answers from its Claude fallback.
 * `vitulus_agent/config/agent/backends.yaml` — who answers the chat
   (`brain`), the back ends (`claude_code`, `codex`) and the role → model table
   (triage, chat, planner, reflector, checker …). In git.

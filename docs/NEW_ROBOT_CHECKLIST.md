@@ -36,7 +36,7 @@ that has the exact command, the reason and the check. No secrets belong here.
 - [ ] `vitulus_traversability` built (switches itself on) — [§2](../INSTALL.md#2-repositories)
 - [ ] Agent: four services active on the same commit — [§8](../INSTALL.md#8-on-board-agent-vitulus_agent-optional)
 - [ ] Agent: `secrets.env` (600, one line per key) loaded by all four services; `authMethod` is `oauth_token` — [§8](../INSTALL.md#model-login)
-- [ ] Agent: `VITULUS_ROSIO_TAP=1` drop-in on all four, `models.yaml` from the example, standing rain rule active — [§8](../INSTALL.md#service-variables-web-guard-lawn-care-standing-rules)
+- [ ] Agent: `VITULUS_ROSIO_TAP=1` drop-in on all four, `models.yaml` from the example, two standing rain rules active, automatic approval as the owner decided (mower left out) — [§8](../INSTALL.md#service-variables-web-guard-lawn-care-standing-rules)
 - [ ] Field kit watcher installed; you know which repos it does not deploy — [§9](../INSTALL.md#9-field-kit-vitulus-field)
 - [ ] Developer tooling: skills, board on `:8099`, review timer — [§11](../INSTALL.md#11-developer--ai-tooling-optional)
 
