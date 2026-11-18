@@ -261,6 +261,10 @@ docker compose -f deploy/docker-compose.yml up -d --build
   → `Up … (healthy)` after 1–2 min; `curl -s localhost:8097/health` lists every
   source as `ok`; `docker inspect -f '{{.HostConfig.RestartPolicy.Name}} {{.HostConfig.Memory}}' vitulus-precip`
   → `unless-stopped 419430400`.
+* After a rebuild or restart the container has no data for a few minutes;
+  until `curl -s localhost:8097/index.json` lists frames the rain gate answers
+  "unknown", not "dry". `/health` counts the downloads per provider host in
+  `fetch.by_host` (requests, MB, errors, per hour).
 * The MapProxy layer (recreating the MapProxy container once so it sees
   `host.docker.internal`): `vitulus_precip/README.md`, *Deployment on the robot*.
 
@@ -326,17 +330,24 @@ Machine-level files live in no package; `setup/` in this repo holds examples.
 * **Ubuntu crash reporting off.** `whoopsie` uploads crash reports and
   `apport` writes memory dumps of crashed processes (ROS nodes included) — a
   privacy leak and CPU/disk load at the worst moment. Ubuntu enables both by
-  default.
+  default. **Mask** them; a plain `disable` is not enough (`whoopsie` is
+  started again when `apport` is touched, and the kernel keeps piping core
+  dumps to apport until it is stopped):
   ```bash
-  sudo systemctl disable --now whoopsie apport
-  sudo systemctl stop apport   # disable --now leaves the SysV apport service active until a reboot
-  sudo rm -f /var/crash/*      # old dumps
+  sudo systemctl mask --now whoopsie apport
+  sudo rm -f /var/crash/*
   ```
-  Check: `systemctl is-enabled whoopsie apport` → `disabled` ×2,
-  `systemctl is-active whoopsie apport` → `inactive` ×2, and
-  `cat /proc/sys/kernel/core_pattern` → `core` — it must not start with
-  `|/usr/share/apport/apport`; if it still does, reboot and check again
-  (`enabled=0` in `/etc/default/apport` keeps it off for good).
+  Check: `systemctl is-enabled whoopsie apport` → `masked` ×2;
+  `cat /proc/sys/kernel/core_pattern` → `core` (it must not start with
+  `|/usr/share/apport/apport`; if it does, reboot and check again);
+  `ls /var/crash` is empty.
+* **System journal capped.** Without a limit the journal grows to 4 GB.
+  ```bash
+  sudo mkdir -p /etc/systemd/journald.conf.d
+  printf '[Journal]\nSystemMaxUse=1G\n' | sudo tee /etc/systemd/journald.conf.d/vitulus.conf
+  sudo systemctl restart systemd-journald && sudo journalctl --vacuum-size=1G
+  ```
+  Check: `journalctl --disk-usage` → about 1 GB or less.
 * **Time zone, swap, lingering.** `sudo timedatectl set-timezone <Region/City>`
   (the calendar of mowing programs and the night window use local time; check
   `timedatectl | grep "Time zone"`). Keep a swap file (2 GB with 16 GB RAM;
@@ -344,9 +355,12 @@ Machine-level files live in no package; `setup/` in this repo holds examples.
   alone. `sudo loginctl enable-linger $USER` lets every `systemctl --user`
   unit of this document start at boot without a login (check
   `loginctl show-user $USER -p Linger` → `Linger=yes`).
-* **Nothing else.** No kernel (`sysctl`) settings and no user crontab are
-  needed; everything periodic is a systemd timer (§6).
-* **sudoers.** Two passwordless rules for the robot user:
+* **sudoers.** `sudo` asks for the password on a terminal, so tools, agents
+  and services cannot use it — only the two passwordless rules below work
+  for them. Put every other one-time administrator step (this chapter, §6)
+  into **one script** the human runs once with `sudo bash <file>`: each step
+  prints OK / FAILED, the script can be run again safely and never restarts
+  the stack. The two rules:
   * time sync — `sudo visudo -f /etc/sudoers.d/vitulus-time`:
     ```
     vitulus ALL=(ALL) NOPASSWD: /usr/bin/systemctl start systemd-timesyncd.service, /usr/bin/systemctl status systemd-timesyncd.service, /usr/bin/systemctl stop systemd-timesyncd.service, /usr/sbin/ntpdate
@@ -450,16 +464,15 @@ source devel/setup.bash
 
 ```bash
 chmod +x ~/catkin_ws/src/vitulus/vitulus/launch/vitulus.startup
-sudo cp ~/catkin_ws/src/vitulus/vitulus/scripts/vitulus.service /etc/systemd/system/
+sudo ln -sfn ~/catkin_ws/src/vitulus/vitulus/scripts/vitulus.service /etc/systemd/system/vitulus.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now vitulus.service
 journalctl -u vitulus.service -f
 ```
 
-The unit is installed **directly** from this repo (a copy, or a symlink to
-`…/vitulus/scripts/vitulus.service`), never through another package. Check:
-`readlink -f /etc/systemd/system/vitulus.service` prints either that path or
-`/etc/systemd/system/vitulus.service` itself.
+The unit is a symlink **directly** to the file in this repo, never through
+another package. Check: `readlink -f /etc/systemd/system/vitulus.service` →
+`…/src/vitulus/vitulus/scripts/vitulus.service`.
 
 Boot chain: `vitulus.service` → `launch/vitulus.startup` (time sync, ROS
 environment, workspace detection; `VITULUS_WS` overrides the detection) →
@@ -467,8 +480,8 @@ environment, workspace detection; `VITULUS_WS` overrides the detection) →
 The service restarts the whole chain 5 s after it exits; publishing `fuse` on
 `/restart_core` makes `main` exit. Then open `http://<robot>:7779/`.
 
-Reading the log later: always bounded, `journalctl -u vitulus.service --since -10min`
-(the journal grows to several GB). Node logs are in `~/.ros/log/latest/`.
+Later always read the log bounded (`journalctl -u vitulus.service --since -10min`);
+node logs are in `~/.ros/log/latest/`.
 
 ### ROS log cleanup (user timer)
 
@@ -642,19 +655,11 @@ use a one-year token:
    ```
    The file lives outside every repository. Keys of the fallback providers
    (below) go into the same file as further `KEY=value` lines.
-4. All four services must read it with
-   `EnvironmentFile=-/home/vitulus/.vitulus/agent/secrets.env` (the leading
-   `-` keeps a missing file from blocking the start). The repo units of `-v2`
-   and `-v2-bridge` carry the line; for `-core` and `-web` add a drop-in:
-   ```bash
-   for u in vitulus-agent-core vitulus-agent-web; do
-     mkdir -p ~/.config/systemd/user/$u.service.d
-     printf '[Service]\nEnvironmentFile=-%%h/.vitulus/agent/secrets.env\n' > ~/.config/systemd/user/$u.service.d/secrets.conf
-   done
-   systemctl --user daemon-reload      # then restart all four (above)
-   ```
-   A changed `secrets.env` or unit reaches a service only after
-   `daemon-reload` and a restart.
+4. All four units read it with
+   `EnvironmentFile=-/home/vitulus/.vitulus/agent/secrets.env` (in the repo's
+   `deploy/*.service`; the leading `-` keeps a missing file from blocking the
+   start). A changed `secrets.env` or unit reaches a service only after
+   `systemctl --user daemon-reload` and a restart of all four.
 
 Check (none of these prints the token):
 
@@ -668,6 +673,42 @@ for u in vitulus-agent-core vitulus-agent-web vitulus-agent-v2 vitulus-agent-v2-
 done
 ( set -a; . ~/.vitulus/agent/secrets.env; claude auth status | grep authMethod )   # "authMethod": "oauth_token"
 ```
+
+### Service variables, web guard, lawn care, standing rules
+
+* **Variables of the services** go into drop-ins, never into the unit copies:
+  `~/.config/systemd/user/vitulus-agent-<x>.service.d/<name>.conf` with
+  `[Service]` and `Environment=NAME=value`, the same file for all four. The
+  standard one is standing ROS subscriptions (instead of ~230 subscribe /
+  unsubscribe calls a minute; the ROS master drops from ~6.6 % to ~4.4 % of a
+  core):
+  ```bash
+  for u in core web v2 v2-bridge; do
+    mkdir -p ~/.config/systemd/user/vitulus-agent-$u.service.d
+    printf '[Service]\nEnvironment=VITULUS_ROSIO_TAP=1\n' > ~/.config/systemd/user/vitulus-agent-$u.service.d/rosio-tap.conf
+  done
+  systemctl --user daemon-reload      # then restart all four
+  ```
+  Undo: delete the files, `daemon-reload`, restart all four. Check:
+  `systemctl --user show -p Environment vitulus-agent-core` contains
+  `VITULUS_ROSIO_TAP=1`.
+* **Web guard** — `config/agent/http_guard.yaml` ships `missing: require_web`:
+  an action request from the browser must carry a fresh one-time ticket
+  (valid 5 s), otherwise the agent refuses it with HTTP 409 `ticket_required`,
+  so a command delayed by a network drop is never executed late. It needs
+  `vitulus_ui` at commit `d7d5d87` or newer (check:
+  `git -C ~/catkin_ws/src/vitulus/vitulus_ui merge-base --is-ancestor d7d5d87 HEAD && echo ok`).
+* **Lawn care** — the `lawn_*` keys in `config/operator/operator.yaml` limit
+  how often the robot stops and turns on the same spot (radius, per day / per
+  week, distances from zone edges, obstacles and the dock) and make the agent
+  pick test points spread over the zones. The record is
+  `~/.vitulus/agent/lawn/wear.jsonl` (created by itself, kept 30 days).
+* **Standing rain rule** — set once, by a sentence to the agent in the chat,
+  e.g. *"Watch the rain: whenever it starts raining and the robot is outside
+  the dock, interrupt what you are doing, return to the dock and tell me."*
+  The agent stores it as a standing watch rule (rain and not in the dock →
+  dock, with interrupt). Check: ask the agent to list its watch rules — the
+  rule is `active`. Limits and quiet hours: `config/agent/watch_rules.yaml`.
 
 ### Models: the owner's policy and the configuration
 
@@ -684,12 +725,12 @@ done
 * `vitulus_agent/config/agent/backends.yaml` — who answers the chat
   (`brain`), the back ends (`claude_code`, `codex`) and the role → model table
   (triage, chat, planner, reflector, checker …). In git.
-* `~/.vitulus/agent/v2/models.yaml` — local overrides of the v2 model
-  assignment; `{}` = none. `models.yaml.last_good` is the last working
-  overlay, saved by the node before each write.
-* `vitulus_agent/config/agent/http_guard.yaml` — not about models: the
-  freshness check of action requests from the web (a one-time ticket valid
-  5 s, so a request delayed by a network drop is not executed late).
+* `~/.vitulus/agent/v2/models.yaml` — the live model assignment (applies
+  without a restart). Write it from the prepared example
+  `config/agent/models.t42.example.yaml` (judge = another Claude model,
+  detection of a used-up limit, the fallback order above); the three commands
+  — apply, check, revert — are in that file's header. `models.yaml.last_good`
+  is the previous state.
 * `~/.vitulus/agent/execution.yaml` — what the agent may execute (the owner's
   consent, `enabled` / `dry_run`). `~/.vitulus/agent/` also holds the
   databases and journals; none of it is in git, back it up with the robot.
@@ -842,14 +883,20 @@ for at least two minutes.
 
 Only after this passes build zones and run the first mowing program.
 
+**Measurement drives** (comparing before / after a change): first the rain
+gate — the precipitation service has data and shows no rain (§3); pause the
+heavy development runs for the length of the drive,
+`tezky --pauza "<reason>" --dokud-pid <PID of the measuring process>` (§11),
+so builds and replays do not distort the CPU numbers; and give targets spread
+over the zones (the agent's test points, §8 lawn care), not one fixed point —
+repeated turns on one spot wear the lawn.
+
 ## 13. Known traps
 
 Each of these has already cost hours.
 
 * Described where they belong: `catkin_make` and the install-first workspace
-  (§5; symptom: after a restart no `/scan` and move_base_flex not connecting),
-  `LD_PRELOAD` and the position of switches in `~/.bashrc` (§4), restarting
-  only one agent service (§8), unbounded `journalctl` (§6).
+  (§5), `LD_PRELOAD` and `~/.bashrc` (§4), restarting one agent service (§8).
 * **A hand-started node survives a stack restart.** A `roslaunch` typed in a
   terminal keeps running when `vitulus.service` restarts; its node name then
   collides with the stack's node and kicks it off the master, and a node
@@ -866,9 +913,8 @@ Each of these has already cost hours.
 * **`pkill -f` / `pgrep -f` inside a compound shell command** matches the
   shell itself and silently skips the rest; put kill logic in a script file or
   use `pid-uzlu` (§11).
-* **Unit linked through a deleted package.** Older installations may have
-  `/etc/systemd/system/vitulus.service` symlinked through the removed
-  `vitulus_bringup` package; re-install it directly (§6).
+* **`vitulus.service` linked through another package** breaks when that
+  package is removed; link it directly (§6).
 * **Python nodes run through small relay stubs in `devel/`** that point into
   `src/`: an edit in `src/` is live after a node restart; never copy a file
   over the stub.
